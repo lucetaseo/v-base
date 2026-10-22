@@ -519,8 +519,8 @@ export default function ContractEditor({ contractId, prefillFrom, prefillCategor
                         <tbody>
                           {form.lineItems.map((l, i) => (
                             <tr key={i}>
-                              <td><input className="input-text full" value={l.name} onChange={(e) => setLine(i, { name: e.target.value })} /></td>
-                              <td>
+                              <td className="li-name" data-label="상품명"><input className="input-text full" value={l.name} onChange={(e) => setLine(i, { name: e.target.value })} /></td>
+                              <td className="li-detail" data-label={paintStyle ? '시공장소 · 품질보증 · 구역' : '상세품목'}>
                                 {paintStyle && isMoldLine(l) ? (
                                   <span className="sub-text">아래 '곰팡이방지 · AS' 체크로 관리</span>
                                 ) : paintStyle ? (
@@ -533,18 +533,18 @@ export default function ContractEditor({ contractId, prefillFrom, prefillCategor
                                       ))}
                                     </div>
                                     <div className="inline-fields">
-                                      <input className="input-text" style={{ width: 110 }} value={l.warranty || ''} onChange={(e) => setLine(i, { warranty: e.target.value })} placeholder="A/S 기간 (예: 10년)" />
-                                      <input className="input-text" style={{ flex: 1, minWidth: 120 }} value={l.zone || ''} onChange={(e) => setLine(i, { zone: e.target.value })} placeholder="비고(구역)" />
+                                      <input className="input-text li-warranty" value={l.warranty || ''} onChange={(e) => setLine(i, { warranty: e.target.value })} placeholder="A/S 기간 (10년)" title="품질보증 A/S 기간 (예: 10년)" />
+                                      <input className="input-text li-zone" value={l.zone || ''} onChange={(e) => setLine(i, { zone: e.target.value })} placeholder="비고(구역)" />
                                     </div>
                                   </div>
                                 ) : (
                                   <input className="input-text full" value={l.detail} onChange={(e) => setLine(i, { detail: e.target.value })} />
                                 )}
                               </td>
-                              <td><input type="number" min="1" className="input-text" style={{ width: 60 }} value={l.qty} onChange={(e) => setLine(i, { qty: e.target.value })} /></td>
-                              <td><input type="number" min="0" className="input-text money" value={l.unitPrice} onChange={(e) => setLine(i, { unitPrice: e.target.value })} /></td>
-                              <td className="text-right">{won((Number(l.qty) || 0) * (Number(l.unitPrice) || 0))}</td>
-                              <td>
+                              <td className="li-qty" data-label="수량"><input type="number" min="1" className="input-text" style={{ width: 60 }} value={l.qty} onChange={(e) => setLine(i, { qty: e.target.value })} /></td>
+                              <td className="li-price" data-label="단가"><input type="number" min="0" className="input-text money" value={l.unitPrice} onChange={(e) => setLine(i, { unitPrice: e.target.value })} /></td>
+                              <td className="text-right li-amount" data-label="금액">{won((Number(l.qty) || 0) * (Number(l.unitPrice) || 0))}</td>
+                              <td className="li-del">
                                 <button type="button" className="btn-text-danger" onClick={() => set('lineItems', form.lineItems.filter((_, j) => j !== i))}>삭제</button>
                               </td>
                             </tr>

@@ -970,6 +970,14 @@ body {
   border-color: #1a6fe0;
   color: #fff;
   font-weight: bold;
+  font-size: 14px;
+  padding: 8px 18px;
+  border-radius: 6px;
+}
+
+.btn-quick.blue:hover {
+  background: #1557b8;
+  border-color: #1557b8;
 }
 
 .welcome {
@@ -4806,5 +4814,99 @@ input[type='month'] {
 @media screen and (max-width: 768px) {
   .paint-bottom {
     grid-template-columns: 1fr;
+  }
+}
+
+/* 계약서 작성 상품 줄: 품질보증·구역 칸 */
+.paint-line .li-warranty {
+  width: 110px;
+}
+
+.paint-line .li-zone {
+  flex: 1;
+  min-width: 120px;
+}
+
+/* 모바일: 상품 줄을 표 대신 카드로 (상품명·시공장소는 한 줄 전체, 수량·단가·금액은 나란히) */
+@media screen and (max-width: 768px) {
+  .line-items {
+    display: block;
+    overflow-x: visible;
+  }
+
+  .line-items thead {
+    display: none;
+  }
+
+  .line-items tbody {
+    display: block;
+  }
+
+  .line-items tr {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+    padding: 10px;
+    margin-bottom: 8px;
+    border: 1px solid #dce1e8;
+    border-radius: 8px;
+    background: #fff;
+  }
+
+  .line-items td {
+    padding: 0;
+    border: 0;
+    min-width: 0;
+  }
+
+  .line-items td[data-label]::before {
+    content: attr(data-label);
+    display: block;
+    margin-bottom: 3px;
+    font-size: 11px;
+    font-weight: 600;
+    color: #64748b;
+  }
+
+  .line-items td.li-name,
+  .line-items td.li-detail {
+    grid-column: 1 / -1;
+  }
+
+  .line-items td.li-amount {
+    text-align: left;
+    font-weight: 700;
+    align-self: end;
+    padding-bottom: 6px;
+  }
+
+  .line-items td.li-del {
+    grid-column: 1 / -1;
+    justify-self: end;
+  }
+
+  .line-items td input.input-text {
+    width: 100% !important;
+    box-sizing: border-box;
+  }
+
+  .line-items .paint-line {
+    min-width: 0;
+  }
+
+  .line-items .paint-places {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
+  }
+
+  .line-items .paint-line .inline-fields {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+    gap: 6px;
+  }
+
+  .line-items .paint-line .li-zone {
+    min-width: 0;
   }
 }

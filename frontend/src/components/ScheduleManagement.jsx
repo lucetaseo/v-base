@@ -19,7 +19,7 @@ import { backdrop } from '../utils/backdrop.js';
 import { navigateForward } from '../router.js';
 import { useRefreshOnReturn } from '../utils/useRefreshOnReturn.js';
 
-const CATEGORY_SHORT = { 청소: '청', 줄눈: '줄', 나노코팅: '나', 탄성: '탄', 새집증후군: '새', 기타: '기' };
+const CATEGORY_SHORT = { 청소: '청', 줄눈: '줄', 나노코팅: '나', 탄성: '탄', 페인트: '페', 기타: '기' };
 const short = (category) => (CATEGORY_SHORT[category] ? `${CATEGORY_SHORT[category]})` : '');
 // 이름 앞에 이미 "줄)"·"탄,줄)" 같은 표시가 있으면 구분 표시를 또 붙이지 않음 ("줄)줄)공두환" 방지)
 const HAS_PREFIX = /^[가-힣,]+\)/;
