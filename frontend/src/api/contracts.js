@@ -13,6 +13,8 @@ import {
   APPROVAL_STATUS,
   ASSIGN_TYPES,
   CATEGORIES,
+  COMPANY_DOC_FIELDS,
+  PAINT_PLACES,
   ESIGN_STATUS,
   MAX_SCHEDULE_STEPS,
   ISSUE_STATUS,
@@ -195,6 +197,8 @@ function normalizeContractInput(db, user, data, existing) {
     happyCallMemo: data.happyCallMemo || '',
     memo: data.memo || '',
     customerNote: String(data.customerNote || '').slice(0, 1000), // 고객 참고사항 (계약서·서명 화면에 고객에게 표시)
+    asCoverage: !!data.asCoverage, // 탄성·페인트: AS 보장범위 (곰팡이·들뜸)
+    reviewPayback: !!data.reviewPayback, // 탄성·페인트: 시공후기 페이백 (계약금액과 별개로 시공 후 돌려줌)
   };
   if (status === '취소' && !out.cancelReason) throw new ApiError('취소 사유를 입력해 주세요.');
 
@@ -207,6 +211,10 @@ function normalizeContractInput(db, user, data, existing) {
         detail: l.detail || '',
         qty: Math.max(1, Math.floor(Number(l.qty) || 1)),
         unitPrice: Math.max(0, Number(l.unitPrice) || 0),
+        // 탄성·페인트 계약서: 시공장소 체크 / 품질보증(A/S 기간) / 비고(구역)
+        ...(Array.isArray(l.places) && l.places.length ? { places: PAINT_PLACES.filter((p) => l.places.includes(p)) } : {}),
+        ...(String(l.warranty || '').trim() ? { warranty: String(l.warranty).trim().slice(0, 30) } : {}),
+        ...(String(l.zone || '').trim() ? { zone: String(l.zone).trim().slice(0, 100) } : {}),
       }));
     // 상품내역이 있으면 시공총액은 상품 합계로 자동 계산
     out.totalAmount = out.lineItems.length
@@ -515,6 +523,8 @@ export const contracts = {
       const changed =
         fields.items !== c.items ||
         (fields.customerNote || '') !== (c.customerNote || '') || // 고객 참고사항도 계약서 내용
+        fields.asCoverage !== !!c.asCoverage || // 탄성·페인트 AS 보장범위·후기 페이백도 계약서 내용
+        fields.reviewPayback !== !!c.reviewPayback ||
         ('totalAmount' in fields &&
           (fields.totalAmount !== c.totalAmount ||
             fields.discount !== c.discount ||
@@ -844,7 +854,15 @@ export const esign = {
       contract: views[0],
       contracts: views,
       // 계약 조건은 이 계약 브랜드 것만 (ContractDocument 가 brandTerms 로 계산)
-      company: { name: company.name, ceo: company.ceo, bizNo: company.bizNo, address: company.address, code: company.code, contractTerms: { [brand]: clone(company.contractTerms?.[brand] || []) } },
+      company: {
+        name: company.name,
+        ceo: company.ceo,
+        bizNo: company.bizNo,
+        address: company.address,
+        ...Object.fromEntries(COMPANY_DOC_FIELDS.map((k) => [k, company[k] || ''])), // 계약서 하단 업체 정보
+        code: company.code,
+        contractTerms: { [brand]: clone(company.contractTerms?.[brand] || []) },
+      },
     };
   },
 

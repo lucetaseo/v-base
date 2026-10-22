@@ -40,6 +40,11 @@ function SuperAdminView() {
       ceo: '',
       bizNo: '',
       address: '',
+      bizType: '',
+      bizItem: '',
+      csPhone: '',
+      mobile: '',
+      quickPhone: '',
       brands: '',
       periodStart: today(),
       periodEnd: addDays(today(), 365),
@@ -58,6 +63,11 @@ function SuperAdminView() {
       ceo: f.ceo,
       bizNo: f.bizNo,
       address: f.address,
+      bizType: f.bizType || '',
+      bizItem: f.bizItem || '',
+      csPhone: f.csPhone || '',
+      mobile: f.mobile || '',
+      quickPhone: f.quickPhone || '',
       brands: f.brands.split(',').map((b) => b.trim()).filter(Boolean),
       periodStart: f.periodStart,
       periodEnd: f.periodEnd,
@@ -243,6 +253,16 @@ function SuperAdminView() {
           </Row>
           <Row label="주소">
             <input className="input-text full" value={companyForm.address} onChange={(e) => setCompanyForm({ ...companyForm, address: e.target.value })} />
+          </Row>
+          <Row label="업태 / 종목">
+            <input className="input-text" placeholder="예: 건설업" value={companyForm.bizType || ''} onChange={(e) => setCompanyForm({ ...companyForm, bizType: e.target.value })} />
+            <input className="input-text" placeholder="예: 페인트, 도장" value={companyForm.bizItem || ''} onChange={(e) => setCompanyForm({ ...companyForm, bizItem: e.target.value })} />
+          </Row>
+          <Row label="고객센터 / 휴대번호 / 빠른문의">
+            <input className="input-text" placeholder="고객센터" value={companyForm.csPhone || ''} onChange={(e) => setCompanyForm({ ...companyForm, csPhone: e.target.value })} />
+            <input className="input-text" placeholder="휴대번호" value={companyForm.mobile || ''} onChange={(e) => setCompanyForm({ ...companyForm, mobile: e.target.value })} />
+            <input className="input-text" placeholder="빠른문의" value={companyForm.quickPhone || ''} onChange={(e) => setCompanyForm({ ...companyForm, quickPhone: e.target.value })} />
+            <div className="sub-text">계약서 하단 업체 정보에 표시됩니다.</div>
           </Row>
           <Row label="브랜드">
             <input className="input-text full" placeholder="쉼표로 구분 (예: 더좋은집, 더스타트)" value={companyForm.brands} onChange={(e) => setCompanyForm({ ...companyForm, brands: e.target.value })} />

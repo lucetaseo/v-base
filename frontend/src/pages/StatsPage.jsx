@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { engineers as engineerApi, purchases as purchaseApi, reports } from '../api/index.js';
 import { useAuth } from '../auth/AuthContext.jsx';
-import { DATE_TYPES } from '../constants.js';
+import { CATEGORIES, DATE_TYPES } from '../constants.js';
 import { calcAmounts, firstScheduleDate } from '../utils/contract.js';
 import { presetRange, isoToDateKey } from '../utils/date.js';
 import { won } from '../utils/format.js';
@@ -16,7 +16,7 @@ const GROUPS = [
   { key: 'owner', label: '작성자별', fn: (c) => c.ownerName || '-' },
   { key: 'engineer', label: '시공기사별' }, // 시공 회차 날짜 기준 (아래 EngineerStats)
 ];
-const CATEGORY_ORDER = ['줄눈', '청소', '탄성', '새집증후군', '나노코팅', '기타'];
+const CATEGORY_ORDER = CATEGORIES;
 // 시공기사별 금액 칸 (관리자: '회사 매출 합계 보기' 권한일 때만 서버가 보내줌)
 const MONEY = [
   ['total', '총금액'],

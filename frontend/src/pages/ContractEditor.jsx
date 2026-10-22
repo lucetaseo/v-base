@@ -21,6 +21,13 @@ import {
   BRANDS,
   CATEGORIES,
   DEFAULT_SCHEDULE_SETTINGS,
+  MOLD_PRICE,
+  MOLD_ROOMS,
+  PAINT_PLACES,
+  PAINT_STYLE_CATEGORIES,
+  REVIEW_PAYBACK,
+  isMoldLine,
+  moldLineName,
   MAX_SCHEDULE_STEPS,
   OFF_LABEL,
   PAYMENT_KINDS,
@@ -101,6 +108,8 @@ function initialForm(contract, company, user) {
     payments: [],
     happyCallMemo: '',
     customerNote: '',
+    asCoverage: false,
+    reviewPayback: false,
   };
 }
 
@@ -195,9 +204,31 @@ export default function ContractEditor({ contractId, prefillFrom, prefillCategor
       ...prev,
       lineItems: [
         ...prev.lineItems,
-        { productId: p.id, name: p.name, detail: [p.detail, p.freeDetail && `[무료시공] ${p.freeDetail}`].filter(Boolean).join('\n'), qty: 1, unitPrice: p.price },
+        {
+          productId: p.id,
+          name: p.name,
+          detail: [p.detail, p.freeDetail && `[무료시공] ${p.freeDetail}`].filter(Boolean).join('\n'),
+          qty: 1,
+          unitPrice: p.price,
+          ...(p.warranty ? { warranty: p.warranty } : {}), // 탄성·페인트: 품질보증(A/S 기간)
+        },
       ],
     }));
+  };
+
+  // 탄성·페인트 계약서 (신화탄성 양식)
+  const paintStyle = PAINT_STYLE_CATEGORIES.includes(form.category);
+  const hasMold = (room) => form.lineItems.some((l) => l.name === moldLineName(room));
+  const toggleMold = (room) =>
+    setForm((prev) => ({
+      ...prev,
+      lineItems: prev.lineItems.some((l) => l.name === moldLineName(room))
+        ? prev.lineItems.filter((l) => l.name !== moldLineName(room))
+        : [...prev.lineItems, { productId: null, name: moldLineName(room), detail: '', qty: 1, unitPrice: MOLD_PRICE }],
+    }));
+  const togglePlace = (i, place) => {
+    const cur = form.lineItems[i].places || [];
+    setLine(i, { places: cur.includes(place) ? cur.filter((x) => x !== place) : [...cur, place] });
   };
 
   const searchCustomer = async () => {
@@ -478,7 +509,7 @@ export default function ContractEditor({ contractId, prefillFrom, prefillCategor
                         <thead>
                           <tr>
                             <th>상품명</th>
-                            <th>상세품목</th>
+                            <th>{paintStyle ? '시공장소 · 품질보증 · 구역' : '상세품목'}</th>
                             <th>수량</th>
                             <th>단가</th>
                             <th>금액</th>
@@ -489,7 +520,27 @@ export default function ContractEditor({ contractId, prefillFrom, prefillCategor
                           {form.lineItems.map((l, i) => (
                             <tr key={i}>
                               <td><input className="input-text full" value={l.name} onChange={(e) => setLine(i, { name: e.target.value })} /></td>
-                              <td><input className="input-text full" value={l.detail} onChange={(e) => setLine(i, { detail: e.target.value })} /></td>
+                              <td>
+                                {paintStyle && isMoldLine(l) ? (
+                                  <span className="sub-text">아래 '곰팡이방지 · AS' 체크로 관리</span>
+                                ) : paintStyle ? (
+                                  <div className="paint-line">
+                                    <div className="paint-places">
+                                      {PAINT_PLACES.map((pl) => (
+                                        <label key={pl} className="radio-item">
+                                          <input type="checkbox" checked={(l.places || []).includes(pl)} onChange={() => togglePlace(i, pl)} /> {pl}
+                                        </label>
+                                      ))}
+                                    </div>
+                                    <div className="inline-fields">
+                                      <input className="input-text" style={{ width: 110 }} value={l.warranty || ''} onChange={(e) => setLine(i, { warranty: e.target.value })} placeholder="A/S 기간 (예: 10년)" />
+                                      <input className="input-text" style={{ flex: 1, minWidth: 120 }} value={l.zone || ''} onChange={(e) => setLine(i, { zone: e.target.value })} placeholder="비고(구역)" />
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <input className="input-text full" value={l.detail} onChange={(e) => setLine(i, { detail: e.target.value })} />
+                                )}
+                              </td>
                               <td><input type="number" min="1" className="input-text" style={{ width: 60 }} value={l.qty} onChange={(e) => setLine(i, { qty: e.target.value })} /></td>
                               <td><input type="number" min="0" className="input-text money" value={l.unitPrice} onChange={(e) => setLine(i, { unitPrice: e.target.value })} /></td>
                               <td className="text-right">{won((Number(l.qty) || 0) * (Number(l.unitPrice) || 0))}</td>
@@ -512,6 +563,30 @@ export default function ContractEditor({ contractId, prefillFrom, prefillCategor
                 )}
               </td>
             </tr>
+            {paintStyle && showAmount && (
+              <tr>
+                <td className="label-col">곰팡이방지 · AS</td>
+                <td className="input-col">
+                  <div className="inline-fields">
+                    <span>곰팡이방지 살균시공</span>
+                    {MOLD_ROOMS.map((room) => (
+                      <label key={room} className="radio-item">
+                        <input type="checkbox" checked={hasMold(room)} onChange={() => toggleMold(room)} /> {room} {won(MOLD_PRICE / 10000)}만원
+                      </label>
+                    ))}
+                    <span className="sub-text">(상품내역에 함께 들어갑니다)</span>
+                  </div>
+                  <div className="inline-fields" style={{ marginTop: 6 }}>
+                    <label className="radio-item">
+                      <input type="checkbox" checked={!!form.asCoverage} onChange={(e) => set('asCoverage', e.target.checked)} /> AS 보장범위: 곰팡이, 들뜸 AS보장
+                    </label>
+                    <label className="radio-item">
+                      <input type="checkbox" checked={!!form.reviewPayback} onChange={(e) => set('reviewPayback', e.target.checked)} /> 시공후기 페이백 (후기이벤트 참여 {won(REVIEW_PAYBACK / 10000)}만원)
+                    </label>
+                  </div>
+                </td>
+              </tr>
+            )}
             <tr>
               <td className="label-col">추가 시공내용</td>
               <td className="input-col">

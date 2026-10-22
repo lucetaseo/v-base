@@ -3,7 +3,20 @@
 export const BRANDS = ['더좋은집', '더스타트'];
 
 // 구분 (품목)
-export const CATEGORIES = ['줄눈', '청소', '탄성', '새집증후군', '나노코팅', '기타'];
+export const CATEGORIES = ['탄성', '줄눈', '청소', '새집증후군', '나노코팅', '페인트', '기타'];
+
+// 탄성·페인트 계약서 (신화탄성 양식): 제품별 시공장소 체크, 품질보증, 구역 / 곰팡이방지 살균시공 / AS 보장범위
+export const PAINT_STYLE_CATEGORIES = ['탄성', '페인트'];
+export const PAINT_PLACES = ['베란다', '대피실', '세탁실', '실외기실'];
+export const MOLD_PREFIX = '곰팡이방지 살균시공';
+export const MOLD_ROOMS = ['드레스룸', '펜트리'];
+export const MOLD_PRICE = 150000;
+export const moldLineName = (room) => `${MOLD_PREFIX} (${room})`;
+export const isMoldLine = (l) => String(l?.name || '').startsWith(MOLD_PREFIX);
+export const REVIEW_PAYBACK = 20000; // 시공 후기이벤트 참여 페이백
+
+// 계약서 하단 업체 정보 (운영자가 업체 등록·수정에서 입력): 업태 / 종목 / 고객센터 / 휴대번호 / 빠른문의
+export const COMPANY_DOC_FIELDS = ['bizType', 'bizItem', 'csPhone', 'mobile', 'quickPhone'];
 // 매입 구분: 시공 구분 + 여러 시공에 같이 쓰는 비용(공통)
 export const PURCHASE_CATEGORIES = ['공통', ...CATEGORIES];
 
@@ -85,6 +98,15 @@ const THEGOOD_TERMS = [
 *본드, 녹, 페인트, 스티커자국 및 약품성 오염등은 청소만으로는 완벽한 제거가 힘듭니다. 가능한 최대한 제거 작업을 해드리오나, 청소팀이 손을대는 경우 '소비자 과실로 인한 하자처리 불가' 사항으로 청소 시 발견된 부분은 별도 표시 후 안내드립니다. (시공사의 하자 접수로 처리가 가능합니다.)`,
 ];
 
+// 탄성·페인트 계약서 기본 조건 (신화탄성 계약서 비고) — {업체} 자리에 업체명
+const PAINT_TERMS = [
+  `위의 제품을 설치함에 있어 계약자를 "갑"으로 하고 {업체}을 "을"이라 하며 다음과 같이 계약을 체결한다.`,
+  '제1조[계약] 본 계약서 작성 및 계약금 납부와 동시에 계약이 성립됨을 확인한다.',
+  '제2조[계약금 및 잔금] "갑"은 본 계약에 의한 계약금은 총 금액의 10%이며, "갑"은 계약한 시공장소에 시공이 완료 상태를 확인 후 잔금을 납부한다.',
+  '제3조[해약 및 취소] 본 계약서 작성 및 계약 체결 후 일정이 정해지지 않는 한 계약금은 100% 환불 가능하다. 단, 일정이 정해진 후에 취소는 다른 일정을 받지 못하였으므로 계약금 환불은 불가하다.',
+  '제4조[시공] "을"은 "갑"의 시공 장소에 계약 제품을 표준시방서에 따라 시공한다. 또한, "을"이 계약서에 달리 정하지 않는 한 "갑"이 요청하는 날까지 시공을 완료하여야 한다.',
+];
+
 // 화면에서 입력하기 전부터 쓰던 조건 (업체주소코드:브랜드) — 운영자가 저장하면 저장한 것이 우선
 const BUILTIN_TERMS = {
   'thegood:더좋은집': THEGOOD_TERMS,
@@ -110,6 +132,10 @@ export function brandTerms(company, brand) {
 // 그 계약서에 보일 조건. categories(계약서의 구분들)에 맞는 '[구분]' 묶음 + 중요 조항(구분 없는 묶음)
 //   맞는 구분 묶음이 없으면(예: 나노코팅) 중요 조항만, 중요 조항도 없으면 전체
 export function contractTermsFor(company, brand, categories = []) {
+  // 운영자가 조건을 입력하지 않은 탄성·페인트 계약서는 신화탄성 계약서 비고 조항
+  if (termsSource(company, brand) === 'default' && categories.length && categories.every((c) => PAINT_STYLE_CATEGORIES.includes(c))) {
+    return PAINT_TERMS.map((t) => t.replace('{업체}', company?.name || brand || '시공사'));
+  }
   const list = brandTerms(company, brand);
   if (!categories.length || !list.some(termSection)) return list;
   const picked = list.filter((t) => !termSection(t) || categories.includes(termSection(t)));

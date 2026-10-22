@@ -4714,3 +4714,97 @@ input[type='month'] {
   grid-column: 1 / -1;
   margin: 0;
 }
+
+/* 탄성·페인트 계약서 (신화탄성 종이 계약서 양식) */
+.paint-line {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 260px;
+}
+
+.paint-places {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 10px;
+}
+
+.paint-doc .doc-title {
+  letter-spacing: 4px;
+}
+
+.paint-doc .doc-table th {
+  white-space: nowrap;
+}
+
+.paint-products thead th,
+.paint-amounts thead th {
+  background: #e5e7eb;
+  text-align: center;
+}
+
+.paint-product strong {
+  font-size: 15px;
+}
+
+.paint-places-cell span {
+  display: inline-block;
+  min-width: 72px;
+  color: #94a3b8;
+}
+
+.paint-places-cell span.on {
+  color: #0f172a;
+  font-weight: 600;
+}
+
+.paint-check {
+  display: inline-block;
+  margin-right: 16px;
+}
+
+.paint-amounts caption {
+  font-weight: 700;
+  padding: 6px 0;
+  color: #334155;
+}
+
+.paint-amounts tr.paint-total th,
+.paint-amounts tr.paint-total td {
+  font-weight: 700;
+  background: #f1f5f9;
+}
+
+.paint-bottom {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.paint-terms {
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  padding: 10px 12px;
+  font-size: 13px;
+}
+
+.paint-terms h4 {
+  margin: 0 0 6px;
+}
+
+.paint-terms p {
+  margin: 0 0 6px;
+  line-height: 1.5;
+}
+
+.paint-company {
+  margin: 0;
+  align-self: start;
+}
+
+@media screen and (max-width: 768px) {
+  .paint-bottom {
+    grid-template-columns: 1fr;
+  }
+}
