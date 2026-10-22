@@ -4680,3 +4680,37 @@ input[type='month'] {
 .stock-move-types .radio-tag {
   white-space: nowrap;
 }
+
+/* 재고체크: 물품 사용 / 물품 등록 전환 */
+.stock-mode {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+  scroll-margin-top: 12px;
+}
+
+.stock-mode button {
+  padding: 9px 18px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  color: #475569;
+  cursor: pointer;
+}
+
+.stock-mode button.active {
+  background: #1d4ed8;
+  border-color: #1d4ed8;
+  color: #fff;
+}
+
+.stock-mode + .purchase-form {
+  margin-top: 8px;
+}
+
+.stock-move-help {
+  grid-column: 1 / -1;
+  margin: 0;
+}
