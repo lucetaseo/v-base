@@ -51,6 +51,7 @@ export const SERVICE_NAMES = [
   'teams',
   'products',
   'apartments',
+  'purchases',
   'customers',
   'contracts',
   'esign',

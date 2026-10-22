@@ -23,6 +23,7 @@ export const {
   teams,
   products,
   apartments,
+  purchases,
   customers,
   contracts,
   esign,

@@ -16,6 +16,7 @@ import CustomerManagement from './components/CustomerManagement.jsx';
 import ScheduleManagement from './components/ScheduleManagement.jsx';
 import ProgressStatus from './components/ProgressStatus.jsx';
 import StatsPage from './pages/StatsPage.jsx';
+import PurchasePage from './pages/PurchasePage.jsx';
 import AccountManagement from './pages/AccountManagement.jsx';
 import SettingsPage from './pages/SettingsPage.jsx';
 import ImportPage from './pages/settings/ImportPage.jsx';
@@ -40,7 +41,17 @@ const MENUS = [
   { key: 'customer', label: '계약자관리', icon: '👤', perm: 'customer.view', path: '/customers' },
   { key: 'schedule', label: '일정관리', icon: '📅', perm: 'schedule.view', path: '/schedule' },
   { key: 'progress', label: '진행상황', icon: '📑', perm: 'stats.view', path: '/progress' },
-  { key: 'stats', label: '통계정보', icon: '📊', perm: 'stats.view', path: '/stats' },
+  {
+    key: 'stats',
+    label: '통계정보',
+    icon: '📊',
+    perm: 'stats.view',
+    path: '/stats',
+    subs: [
+      { key: 'statsMain', label: '통계정보', path: '/stats', exact: true },
+      { key: 'purchases', label: '매입관리', path: '/stats/purchases', perm: 'purchase.manage' },
+    ],
+  },
   // 운영자 전용 (업체 관리자는 설정 > 사용자관리 에서 실장을 관리)
   { key: 'accounts', label: '업체/계정관리', icon: '🔑', visible: (u) => u.role === ROLES.SUPER, path: '/admin' },
   { key: 'alimtalk', label: '알림톡연결', icon: '💬', visible: (u) => u.role === ROLES.SUPER, path: '/admin/alimtalk' },
@@ -170,7 +181,8 @@ function MainLayout({ route }) {
     ? Math.ceil((new Date(`${periodEnd}T00:00:00`) - new Date(`${today()}T00:00:00`)) / 86400000)
     : null;
 
-  const subActive = (s) => (s.key === 'main' ? path === s.path || /^\/contracts\/(\d+|new)/.test(path) : path.startsWith(s.path));
+  const subActive = (s) =>
+    s.exact ? path === s.path : s.key === 'main' ? path === s.path || /^\/contracts\/(\d+|new)/.test(path) : path.startsWith(s.path);
 
   return (
     <div className="app-container">
@@ -253,7 +265,8 @@ function MainLayout({ route }) {
         {current?.key === 'customer' && <CustomerManagement route={route} />}
         {current?.key === 'schedule' && <ScheduleManagement />}
         {current?.key === 'progress' && <ProgressStatus />}
-        {current?.key === 'stats' && <StatsPage />}
+        {current?.key === 'stats' &&
+          (path.startsWith('/stats/purchases') && current.subs.some((s) => s.key === 'purchases') ? <PurchasePage /> : <StatsPage />)}
         {current?.key === 'accounts' && <AccountManagement />}
         {current?.key === 'alimtalk' && <AlimtalkSettings />}
         {current?.key === 'terms' && <ContractTermsSettings />}

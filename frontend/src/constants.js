@@ -4,6 +4,8 @@ export const BRANDS = ['더좋은집', '더스타트'];
 
 // 구분 (품목)
 export const CATEGORIES = ['줄눈', '청소', '탄성', '새집증후군', '나노코팅', '기타'];
+// 매입 구분: 시공 구분 + 여러 시공에 같이 쓰는 비용(공통)
+export const PURCHASE_CATEGORIES = ['공통', ...CATEGORIES];
 
 // 고객에게 계약서 한 장으로 묶어 보내는 구분 (같은 계약자·현장일 때). 그 외(나노코팅 등)는 따로
 export const SIGN_TOGETHER = ['줄눈', '청소'];

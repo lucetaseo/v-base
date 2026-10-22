@@ -51,7 +51,7 @@ before(async () => {
   const c = new pg.Client({ connectionString: url });
   await c.connect();
   await c.query(`DROP TABLE IF EXISTS meta, companies, users, engineers, engineer_offs, teams, products,
-    apartments, customers, contracts, notifications, contract_signatures, payment_receipts CASCADE`);
+    apartments, customers, contracts, notifications, contract_signatures, payment_receipts, purchases CASCADE`);
   await c.end();
 });
 
@@ -553,6 +553,40 @@ test('회사 매출 합계: 권한 없는 실장은 통계에 금액이 없고, 
   await boss.ok('users', 'update', u.id, { permissions: [...u.permissions, 'sales.total'] });
   await mgr.ok('auth', 'login', 'salesmgr', 'sales1234');
   assert.ok((await mgr.ok('reports', 'contracts', {})).some((r) => r.totalAmount > 0), '허락 후에는 통계 금액 보임');
+});
+
+test('매입관리: 관리자 등록·수정·삭제, 기간 조회, 권한 없는 실장 차단, 다른 업체와 분리', async () => {
+  const boss = client();
+  await boss.ok('auth', 'login', 'admin', 'admin1234');
+  const a = await boss.ok('purchases', 'save', { date: '2026-09-03', category: '줄눈', vendor: '자재상', item: '줄눈재 20박스', amount: '1,200,000' });
+  assert.equal(a.amount, 1200000, '쉼표 있는 금액도 숫자로');
+  await boss.ok('purchases', 'save', { date: '2026-10-05', category: '없는구분', item: '공구', amount: 30000 });
+  assert.equal((await boss('purchases', 'save', { date: '2026-10-05', item: '공구', amount: 0 })).status, 400, '0원 거부');
+  assert.equal((await boss('purchases', 'save', { date: '', item: '공구', amount: 100 })).status, 400, '날짜 없으면 거부');
+  assert.equal((await boss('purchases', 'save', { date: '2026-10-05', item: ' ', amount: 100 })).status, 400, '품목 없으면 거부');
+
+  const sept = await boss.ok('purchases', 'list', { from: '2026-09-01', to: '2026-09-30' });
+  assert.deepEqual(sept.map((r) => r.item), ['줄눈재 20박스'], '기간 안 매입만');
+  const all = await boss.ok('purchases', 'list', {});
+  assert.equal(all.length, 2);
+  assert.equal(all[0].category, '공통', '모르는 구분은 공통으로');
+
+  await boss.ok('purchases', 'save', { ...a, amount: 1000000 });
+  assert.equal((await boss.ok('purchases', 'list', { from: '2026-09-01', to: '2026-09-30' }))[0].amount, 1000000, '수정');
+  await boss.ok('purchases', 'remove', a.id);
+  assert.equal((await boss.ok('purchases', 'list', {})).length, 1, '삭제');
+
+  await boss.ok('users', 'create', { role: 'MANAGER', loginId: 'buymgr', password: 'buy12345', name: '매입실장', permissions: ['stats.view'], dataScope: 'all' });
+  const mgr = client();
+  await mgr.ok('auth', 'login', 'buymgr', 'buy12345');
+  assert.equal((await mgr('purchases', 'list', {})).status, 403, '매입 권한 없으면 조회 불가');
+  assert.equal((await mgr('purchases', 'save', { date: '2026-10-05', item: 'x', amount: 1 })).status, 403, '등록 불가');
+
+  const other = client(); // 위 '업체 주소 코드' 시험에서 만든 다른 업체
+  await other.ok('auth', 'login', 'otheradmin', 'other1234', 'other-co');
+  assert.equal((await other.ok('purchases', 'list', {})).length, 0, '다른 업체 매입은 안 보임');
+  const mine = (await boss.ok('purchases', 'list', {}))[0];
+  assert.equal((await other('purchases', 'remove', mine.id)).status, 404, '다른 업체 매입 삭제 불가');
 });
 
 test('입금 영수증 사진 여러 장: 추가·일부 삭제·최대 5장, 계약 수정 뒤에도 사진 수 유지', async () => {

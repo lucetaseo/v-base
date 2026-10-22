@@ -13,10 +13,11 @@ const TABLE_MAP = {
   contracts: 'contracts',
   notifications: 'notifications',
   paymentReceipts: 'payment_receipts',
+  purchases: 'purchases',
 };
 export const TABLE_KEYS = Object.keys(TABLE_MAP);
 // 업체별로 나뉘는 테이블 (요청한 사람의 업체 데이터만 읽음)
-const COMPANY_SCOPED = ['engineerOffs', 'teams', 'products', 'apartments', 'customers', 'contracts', 'notifications', 'paymentReceipts'];
+const COMPANY_SCOPED = ['engineerOffs', 'teams', 'products', 'apartments', 'customers', 'contracts', 'notifications', 'paymentReceipts', 'purchases'];
 // 영수증 사진은 용량이 커서 기본으로 읽지 않음 (scope.receiptsFor 로 해당 계약 것만)
 const HEAVY = ['paymentReceipts'];
 
