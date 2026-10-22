@@ -4910,3 +4910,11 @@ input[type='month'] {
     min-width: 0;
   }
 }
+
+/* 데이터 가져오기: [파일 선택] [양식 받기] */
+.import-file-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}

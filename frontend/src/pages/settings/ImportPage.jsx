@@ -5,6 +5,7 @@ import { useAuth } from '../../auth/AuthContext.jsx';
 import { categoriesFromName, mapLegacyRow, parseLegacyHtml } from '../../utils/legacyImport.js';
 import { won } from '../../utils/format.js';
 import { CATEGORIES } from '../../constants.js';
+import { downloadTemplate, mapSheetContractRow, readSheetRows } from '../../utils/importTemplates.js';
 
 // 설정 > 데이터 가져오기 (관리자 전용)
 //   1) 기사 목록 (엑셀/CSV: 이름, 아이디, 연락처)
@@ -38,6 +39,21 @@ const readFile = (file, as) =>
     if (as === 'text') r.readAsText(file, 'utf-8');
     else r.readAsArrayBuffer(file);
   });
+
+// [파일 선택] 옆 [양식 받기]: 칸 이름·예시가 들어 있는 엑셀
+function FilePick({ kind, accept, onPick }) {
+  return (
+    <div className="import-file-row">
+      <label className="btn-file">
+        파일 선택
+        <input type="file" accept={accept} onChange={onPick} hidden />
+      </label>
+      <button type="button" className="btn-outline-action" onClick={() => downloadTemplate(kind)}>
+        📄 양식 받기 (엑셀)
+      </button>
+    </div>
+  );
+}
 
 export default function ImportPage() {
   return (
@@ -103,10 +119,7 @@ function EngineerImport() {
     <section className="import-box">
       <h3>1. 기사 목록</h3>
       <p className="sub-text">엑셀(.xlsx) 또는 CSV. 첫 줄 제목: <b>이름, 아이디, 연락처</b> (담당시공은 선택). 담당시공 칸이 비어 있으면 이름 앞 표시(줄)·청)·코)·탄))로 자동 지정됩니다.</p>
-      <label className="btn-file">
-        파일 선택
-        <input type="file" accept=".xlsx,.xls,.csv" onChange={pick} hidden />
-      </label>
+      <FilePick kind="engineers" accept=".xlsx,.xls,.csv" onPick={pick} />
       {rows && (
         <>
           <div className="table-responsive import-preview">
@@ -161,10 +174,18 @@ function ContractImport() {
     if (!file) return;
     setResult(null);
     try {
-      const text = await readFile(file, 'text');
-      const raw = parseLegacyHtml(text);
-      if (!raw.length) throw new Error('예전 프로그램의 계약 엑셀다운로드 파일이 아닙니다. (계약 줄을 찾지 못했습니다)');
-      const rows = raw.map(mapLegacyRow);
+      // 예전 프로그램 파일(.xls 이름의 HTML 표) → 아니면 [양식 받기] 엑셀 양식
+      const raw = /\.(xlsx|csv)$/i.test(file.name) ? [] : parseLegacyHtml(await readFile(file, 'text'));
+      let rows = raw.map(mapLegacyRow);
+      if (!rows.length) {
+        const sheet = readSheetRows(await readFile(file));
+        if (!sheet.length || !('고객명' in sheet[0]) || !('계약일' in sheet[0])) {
+          throw new Error('계약 줄을 찾지 못했습니다. 예전 프로그램의 엑셀다운로드 파일이나 [양식 받기] 양식(첫 줄에 계약일·고객명 등 제목)으로 올려 주세요.');
+        }
+        rows = sheet.filter((r) => String(r['고객명'] || '').trim()).map(mapSheetContractRow);
+        const bad = rows.filter((r) => !r.contractDate).length;
+        if (bad) throw new Error(`계약일이 비었거나 날짜 형식(2026-10-22)이 아닌 줄이 ${bad}개 있습니다. 고친 뒤 다시 올려 주세요.`);
+      }
       const count = (f) => rows.reduce((m, r) => ((m[f(r)] = (m[f(r)] || 0) + 1), m), {});
       const dates = rows.map((r) => r.contractDate).filter(Boolean).sort();
       setPreview({
@@ -216,12 +237,11 @@ function ContractImport() {
 
   return (
     <section className="import-box">
-      <h3>2. 계약 (예전 프로그램 엑셀다운로드 파일)</h3>
-      <p className="sub-text">예전 프로그램 [계약관리 → 엑셀다운로드]로 받은 .xls 파일을 그대로 올리세요. 상품내역·메모·기사전달사항·입금액·시공예정일①②·시공담당까지 옮겨집니다.</p>
-      <label className="btn-file">
-        파일 선택
-        <input type="file" accept=".xls,.html,.htm" onChange={pick} hidden />
-      </label>
+      <h3>2. 계약</h3>
+      <p className="sub-text">
+        예전 프로그램 [계약관리 → 엑셀다운로드]로 받은 .xls 파일을 그대로 올리거나, <b>[양식 받기]</b>로 받은 엑셀에 계약을 채워 올리세요. 양식의 필수 칸: <b>계약일, 고객명, 연락처, 아파트명</b> (두 번째 시트 '작성 방법'에 칸별 설명).
+      </p>
+      <FilePick kind="contracts" accept=".xls,.xlsx,.csv,.html,.htm" onPick={pick} />
       {preview && (
         <div className="import-summary">
           <table className="form-grid-table">
@@ -306,10 +326,7 @@ function UserImport() {
       <p className="sub-text">
         엑셀 첫 줄 제목: <b>이름, 아이디, 비밀번호, 부서, 직급</b>. 부서가 <b>시공팀</b>이면 기사모바일 계정(같은 이름의 기사에 연결, 없으면 새 기사), 나머지는 <b>실장 계정(기본 권한)</b>으로 만듭니다. 권한은 [사용자관리]에서 바꿔 주세요. 이미 있는 아이디는 건너뜁니다.
       </p>
-      <label className="btn-file">
-        파일 선택
-        <input type="file" accept=".xlsx,.xls,.csv" onChange={pick} hidden />
-      </label>
+      <FilePick kind="users" accept=".xlsx,.xls,.csv" onPick={pick} />
       {rows && (
         <>
           <div className="table-responsive import-preview">
