@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { stocks } from '../api/index.js';
 import { useAuth } from '../auth/AuthContext.jsx';
 import { PURCHASE_CATEGORIES } from '../constants.js';
@@ -16,7 +16,7 @@ const cleanQty = (v) => v.replace(/[^\d.]/g, '').replace(/(\..*)\./g, '$1');
 const low = (r) => r.minQty > 0 && r.qty <= r.minQty;
 
 const emptyItem = () => ({ name: '', category: '공통', spec: '', unit: '통', minQty: '', startQty: '', memo: '' });
-const emptyMove = () => ({ date: today(), type: '사용', qty: '', memo: '' });
+const emptyMove = () => ({ itemId: '', date: today(), type: '사용', qty: '', memo: '' });
 
 // 기록마다 그 시점의 재고 (최근 기록이 위로)
 function withBalance(moves = []) {
@@ -41,10 +41,25 @@ export default function StockPage() {
   const [lowOnly, setLowOnly] = useState(false);
   const [showInactive, setShowInactive] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [mode, setMode] = useState('use'); // 위쪽 입력창: 'use' 물품 사용(입고·실사) / 'item' 물품 등록
+  const topRef = useRef(null);
+  const qtyRef = useRef(null);
 
-  const load = useCallback(() => stocks.list({ includeInactive: true }).then(setRows).catch(handleError), [handleError]);
+  const load = useCallback(
+    () =>
+      stocks
+        .list({ includeInactive: true })
+        .then((list) => {
+          setRows(list);
+          return list;
+        })
+        .catch(handleError),
+    [handleError],
+  );
   useEffect(() => {
-    load();
+    load().then((list) => {
+      if (list && !list.some((r) => r.active !== false)) setMode('item'); // 품목이 없으면 등록부터
+    });
   }, [load]);
 
   const run = async (fn) => {
@@ -70,6 +85,17 @@ export default function StockPage() {
     );
   }, [rows, query, cat, lowOnly, showInactive]);
   const picked = rows.find((r) => r.id === pickedId);
+  const activeRows = rows.filter((r) => r.active !== false);
+  const moveItem = rows.find((r) => r.id === Number(move.itemId));
+
+  // 품목 줄의 [사용]/[입고]/[실사] → 위쪽 '물품 사용' 창에 그 품목·종류를 넣고 수량 칸으로
+  const startMove = (r, type) => {
+    setMode('use');
+    setMove((m) => ({ ...m, itemId: r.id, type, qty: '' }));
+    setPickedId(r.id);
+    topRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    setTimeout(() => qtyRef.current?.focus(), 300);
+  };
   const lowCount = rows.filter((r) => r.active !== false && low(r)).length;
 
   const saveItem = (e) => {
@@ -77,7 +103,10 @@ export default function StockPage() {
     run(async () => {
       const saved = await stocks.saveItem(item);
       setItem(emptyItem());
-      if (!item.id) setPickedId(saved.id);
+      if (!item.id) {
+        setPickedId(saved.id);
+        setMove((m) => ({ ...m, itemId: saved.id }));
+      }
     });
   };
 
@@ -93,8 +122,9 @@ export default function StockPage() {
   const addMove = (e) => {
     e.preventDefault();
     run(async () => {
-      await stocks.addMove(picked.id, move);
-      setMove((m) => ({ ...emptyMove(), date: m.date, type: m.type }));
+      await stocks.addMove(moveItem.id, move);
+      setPickedId(moveItem.id); // 아래에 그 품목 기록이 보이게
+      setMove((m) => ({ ...emptyMove(), itemId: m.itemId, date: m.date, type: m.type }));
     });
   };
 
@@ -107,12 +137,66 @@ export default function StockPage() {
     <div className="page-card">
       <h2>재고체크</h2>
       <ul className="notice-list">
-        <li>페인트·자재 품목을 등록하고 입고 / 사용 / 실사를 기록하면 현재고가 자동으로 계산됩니다.</li>
+        <li>[물품 등록]으로 페인트·자재 품목을 만들고, [물품 사용]이나 목록의 [사용] 버튼으로 쓴 수량을 적으면 현재고가 자동으로 계산됩니다.</li>
         <li>실사: 창고에서 실제로 세어 본 남은 수량을 적으면 그 수량으로 맞춰집니다.</li>
         <li>[매입관리]에서 매입을 등록할 때 재고 품목을 고르면 입고가 함께 기록됩니다.</li>
         <li>부족 알림 수량을 정해 두면 그 이하로 남았을 때 빨간색으로 표시됩니다.</li>
       </ul>
 
+      <div className="stock-mode" ref={topRef}>
+        <button type="button" className={mode === 'use' ? 'active' : ''} onClick={() => setMode('use')}>
+          ✏️ 물품 사용
+        </button>
+        <button type="button" className={mode === 'item' ? 'active' : ''} onClick={() => setMode('item')}>
+          📦 물품 등록
+        </button>
+      </div>
+
+      {mode === 'use' && (
+        <form className="purchase-form" onSubmit={addMove}>
+          <label className="wide">
+            <span>품목</span>
+            <select className="input-select" value={move.itemId} onChange={(e) => setMove({ ...move, itemId: e.target.value ? Number(e.target.value) : '' })} required>
+              <option value="">품목을 고르세요</option>
+              {activeRows.map((r) => (
+                <option key={r.id} value={r.id}>
+                  {r.name}
+                  {r.spec ? ` (${r.spec})` : ''} — 현재 {num(r.qty)}
+                  {r.unit}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <span>날짜</span>
+            <input type="date" className="input-date" value={move.date} onChange={(e) => setMove({ ...move, date: e.target.value })} required />
+          </label>
+          <div className="stock-move-types">
+            {MOVE_TYPES.map(([t, help]) => (
+              <label key={t} className={`radio-tag ${move.type === t ? 'selected' : ''}`} title={help}>
+                <input type="radio" checked={move.type === t} onChange={() => setMove({ ...move, type: t })} />
+                {t}
+              </label>
+            ))}
+          </div>
+          <label>
+            <span>{move.type === '실사' ? '실제 남은 수량' : '수량'}{moveItem ? `(${moveItem.unit})` : ''}</span>
+            <input ref={qtyRef} className="input-text text-right" inputMode="decimal" value={move.qty} onChange={(e) => setMove({ ...move, qty: cleanQty(e.target.value) })} placeholder="0" required />
+          </label>
+          <label className="wide">
+            <span>메모</span>
+            <input className="input-text" value={move.memo} onChange={(e) => setMove({ ...move, memo: e.target.value })} placeholder="예: ○○아파트 현장 사용" />
+          </label>
+          <div className="purchase-form-actions">
+            <button type="submit" className="btn-dark-lg sm" disabled={saving || !moveItem}>
+              {move.type} 기록
+            </button>
+          </div>
+          <p className="sub-text stock-move-help">{MOVE_TYPES.find(([t]) => t === move.type)[1]}</p>
+        </form>
+      )}
+
+      {mode === 'item' && (
       <form className="purchase-form" onSubmit={saveItem}>
         <label className="wide">
           <span>품목명</span>
@@ -159,6 +243,7 @@ export default function StockPage() {
           )}
         </div>
       </form>
+      )}
 
       <div className="filter-row">
         <input className="input-text" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="품목·규격 검색" style={{ maxWidth: 200 }} />
@@ -240,10 +325,28 @@ export default function StockPage() {
                   <td className="text-right nowrap">{r.minQty ? `${num(r.minQty)} ${r.unit}` : '-'}</td>
                   <td className="nowrap sub-text">{last ? `${last.date} ${last.type} ${num(last.qty)}` : '-'}</td>
                   <td className="nowrap" onClick={(e) => e.stopPropagation()}>
-                    <button type="button" className="btn-link" onClick={() => setPickedId(r.id)}>
-                      입출고
-                    </button>{' '}
-                    <button type="button" className="btn-link" onClick={() => setItem({ ...r, minQty: String(r.minQty || '') })}>
+                    {r.active !== false && (
+                      <>
+                        <button type="button" className="btn-dark-sm" onClick={() => startMove(r, '사용')}>
+                          사용
+                        </button>{' '}
+                        <button type="button" className="btn-link" onClick={() => startMove(r, '입고')}>
+                          입고
+                        </button>{' '}
+                        <button type="button" className="btn-link" onClick={() => startMove(r, '실사')}>
+                          실사
+                        </button>{' '}
+                      </>
+                    )}
+                    <button
+                      type="button"
+                      className="btn-link"
+                      onClick={() => {
+                        setItem({ ...r, minQty: String(r.minQty || '') });
+                        setMode('item');
+                        topRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                      }}
+                    >
                       수정
                     </button>{' '}
                     <button type="button" className="btn-text-danger" onClick={() => removeItem(r)}>
@@ -265,38 +368,15 @@ export default function StockPage() {
             <span className={low(picked) ? 'text-red' : ''}>
               {num(picked.qty)} {picked.unit}
             </span>
-            <button type="button" className="btn-link" style={{ marginLeft: 12 }} onClick={() => setPickedId(null)}>
+            {picked.active !== false && (
+              <button type="button" className="btn-dark-sm" style={{ marginLeft: 12 }} onClick={() => startMove(picked, '사용')}>
+                사용 기록하기
+              </button>
+            )}
+            <button type="button" className="btn-link" style={{ marginLeft: 8 }} onClick={() => setPickedId(null)}>
               닫기
             </button>
           </h3>
-          <form className="purchase-form" onSubmit={addMove}>
-            <label>
-              <span>날짜</span>
-              <input type="date" className="input-date" value={move.date} onChange={(e) => setMove({ ...move, date: e.target.value })} required />
-            </label>
-            <div className="stock-move-types">
-              {MOVE_TYPES.map(([t, help]) => (
-                <label key={t} className={`radio-tag ${move.type === t ? 'selected' : ''}`} title={help}>
-                  <input type="radio" checked={move.type === t} onChange={() => setMove({ ...move, type: t })} />
-                  {t}
-                </label>
-              ))}
-            </div>
-            <label>
-              <span>{move.type === '실사' ? `실제 남은 수량(${picked.unit})` : `수량(${picked.unit})`}</span>
-              <input className="input-text text-right" inputMode="decimal" value={move.qty} onChange={(e) => setMove({ ...move, qty: cleanQty(e.target.value) })} placeholder="0" required />
-            </label>
-            <label className="wide">
-              <span>메모</span>
-              <input className="input-text" value={move.memo} onChange={(e) => setMove({ ...move, memo: e.target.value })} placeholder="예: ○○아파트 현장 사용" />
-            </label>
-            <div className="purchase-form-actions">
-              <button type="submit" className="btn-dark-lg sm" disabled={saving || picked.active === false}>
-                {move.type} 기록
-              </button>
-            </div>
-          </form>
-          <p className="sub-text">{MOVE_TYPES.find(([t]) => t === move.type)[1]}</p>
           <div className="table-responsive">
             <table className="customer-table">
               <thead>
