@@ -1,0 +1,146 @@
+// 업무 코드값 모음. 추후 '설정' 메뉴에서 업체별로 관리하도록 확장할 값들입니다.
+
+export const BRANDS = ['더좋은집', '더스타트'];
+
+// 구분 (품목)
+export const CATEGORIES = ['줄눈', '청소', '탄성', '새집증후군', '나노코팅', '기타'];
+
+// 고객에게 계약서 한 장으로 묶어 보내는 구분 (같은 계약자·현장일 때). 그 외(나노코팅 등)는 따로
+export const SIGN_TOGETHER = ['줄눈', '청소'];
+
+// 시공종류
+export const WORK_TYPES = ['시공', 'AS', '하자보수'];
+
+export const RECEPTION_TYPES = ['음성계약', '박람회', '옵션', '사전계약', '무상시공'];
+
+// 시공상태(최종) — 고객 모바일웹에 표시되는 값
+export const WORK_STATUS = ['미정', '해피콜완료', '배정', '시공완료', '시공연기', '취소'];
+
+// 기사가 모바일웹에서 보고하는 회차별 상태 ('' = 입력 전)
+export const MOBILE_STATUS = ['시공완료', '시공연기요청', '시공불가'];
+
+// 계약승인
+export const APPROVAL_STATUS = ['승인대기', '승인', '미승인'];
+
+// 시공 담당 지정 방식
+export const ASSIGN_TYPES = { ENGINEER: 'engineer', TEAM: 'team' };
+
+// 기사 휴무 구분
+export const OFF_PERIODS = [
+  { value: 'AM', label: '오전' },
+  { value: 'PM', label: '오후' },
+  { value: 'DAY', label: '종일' },
+];
+export const OFF_LABEL = { AM: '오전', PM: '오후', DAY: '종일' };
+
+// 일정관리설정 기본값 (업체별로 설정 > 일정관리설정에서 변경)
+export const DEFAULT_SCHEDULE_SETTINGS = {
+  amEnd: '12:00', // 이 시각 이전 시작 = 오전, 이후 = 오후
+  startTime: '08:00',
+  endTime: '20:00',
+  interval: 30,
+  maxPerDay: 0, // 기사 1인 하루 최대 배정 건수 (0 = 제한 없음)
+};
+
+// 입금 구분
+export const PAYMENT_KINDS = ['계약금', '중도금', '잔금', '추가금', '환불'];
+
+// 영수증 발행 구분
+export const RECEIPT_TYPES = ['미발행', '현금영수증', '세금계산서', '카드전표'];
+
+// 계약 단위 세금계산서 / 현금영수증 발행 상태
+export const ISSUE_STATUS = ['', '발행요청', '발행완료', '해당없음'];
+
+// 계약서 '계약 조건' — 운영자(super) > 계약조건 화면에서 업체·브랜드별로 입력 (company.contractTerms[브랜드])
+//   형식: 문자열 묶음 목록. '[구분]' 첫 줄 + 한 줄에 한 항목 → 그 구분 계약서에만 표시,
+//         '[구분]'으로 시작하지 않는 묶음(계약 당사자·대금 등 중요 조항)은 모든 계약서 맨 앞에 강조
+//   입력하지 않은 브랜드는 아래 기본(예전부터 쓰던 조건) 사용
+//   이미 서명한 계약서는 서명할 때의 조건이 계약에 함께 저장되어 바뀌지 않음
+export const DEFAULT_CONTRACT_TERMS = [
+  '시공 일정은 고객과 협의하여 확정하며, 일정 변경은 시공 3일 전까지 요청해야 합니다.',
+  '잔금은 시공 완료 후 당일 결제를 원칙으로 합니다.',
+  '시공 후 하자 발생 시 보증기간 내 무상 A/S 를 제공합니다.',
+  '고객 사정에 의한 계약 취소 시 계약금은 환불되지 않을 수 있습니다.',
+];
+
+// 더좋은집 계약서 안내 — '[구분]' 첫 줄 + '*' 항목들. 계약서에는 그 계약의 구분(줄눈·청소) 부분만 표시
+//   '[구분]'으로 시작하지 않는 항목(맨 앞 계약 당사자·대금 조항)은 모든 계약서에 항상 표시
+const THEGOOD_TERMS = [
+  `본 계약에서 계약 의뢰인을 “갑”, 시공 업체 [더좋은집]을 “을”이라 칭하며, “갑”과 “을”은 아래의 사항에 합의하여 본 계약을 체결합니다.
+
+1. “갑”은 “을”에게 총 시공 금액 중 일부를 계약금으로 납부하며, 이 계약금은 “더좋은집”에 귀속됩니다. 시공 완료 후 지급하는 잔금은 현장 시공을 담당하는 팀장에게 직접 지급하며, 이는 현장 작업비로 사용되어 본사 매출로 처리되지 않습니다. 또한 “갑”은 “을”의 시공이 완료되는 당일 잔금을 납부해야 합니다.`,
+  `[줄눈]
+*AS규정 : 시공 하자 3년 / 아파트 하자 시공일로부터 3개월 이내 (타일 5장이내, 1회에 한하여 무상지원 / 그 외 유상)
+*현관/욕실벽(600*600), 화장실/세탁실/베란다(300*300), 아트월(600*1200), 폴리싱/포세린(600*600mm)기준과 다른 경우 비용 발생`,
+  `[청소]
+*발코니 / 테라스 / 복층 청소는 별도협의.
+*한국인 팀장 및 내.외국인 팀원구성
+*청소 후 당일 검수, 당일결제 원칙 (미방문 시 사진 검수 후 AS 1일 이내 가능)
+*창문 외부를 바라보고 있는 모든 '면' 과 난간 제외
+*인테리어 후 청소비용 별도 협의
+*가전제품 내부(에어컨/냉장고/세탁기 등), 기본옵션 외 추가된 가구(옵션/사제 붙박이장 등) 청소 요청 시 별도 협의
+*보양지 제거 비용은 별도 협의
+*본드, 녹, 페인트, 스티커자국 및 약품성 오염등은 청소만으로는 완벽한 제거가 힘듭니다. 가능한 최대한 제거 작업을 해드리오나, 청소팀이 손을대는 경우 '소비자 과실로 인한 하자처리 불가' 사항으로 청소 시 발견된 부분은 별도 표시 후 안내드립니다. (시공사의 하자 접수로 처리가 가능합니다.)`,
+];
+
+// 화면에서 입력하기 전부터 쓰던 조건 (업체주소코드:브랜드) — 운영자가 저장하면 저장한 것이 우선
+const BUILTIN_TERMS = {
+  'thegood:더좋은집': THEGOOD_TERMS,
+};
+
+// '[줄눈]' 처럼 구분 이름으로 시작하는 조건 묶음
+export const termSection = (t) => (/^\[([^\]]+)\]/.exec(String(t)) || [])[1] || '';
+
+// 계약 조건이 어디서 오는지: 'saved'(운영자 입력) / 'builtin'(예전 고정 조건) / 'default'(기본 4줄)
+export function termsSource(company, brand) {
+  const saved = company?.contractTerms?.[brand];
+  if (Array.isArray(saved) && saved.some((t) => String(t).trim())) return 'saved';
+  return BUILTIN_TERMS[`${company?.code || ''}:${brand}`] ? 'builtin' : 'default';
+}
+
+// 업체·브랜드의 계약 조건 전체 (운영자 저장 > 예전 고정 조건 > 기본)
+export function brandTerms(company, brand) {
+  const src = termsSource(company, brand);
+  if (src === 'saved') return company.contractTerms[brand];
+  return src === 'builtin' ? BUILTIN_TERMS[`${company.code}:${brand}`] : DEFAULT_CONTRACT_TERMS;
+}
+
+// 그 계약서에 보일 조건. categories(계약서의 구분들)에 맞는 '[구분]' 묶음 + 중요 조항(구분 없는 묶음)
+//   맞는 구분 묶음이 없으면(예: 나노코팅) 중요 조항만, 중요 조항도 없으면 전체
+export function contractTermsFor(company, brand, categories = []) {
+  const list = brandTerms(company, brand);
+  if (!categories.length || !list.some(termSection)) return list;
+  const picked = list.filter((t) => !termSection(t) || categories.includes(termSection(t)));
+  return picked.length ? picked : list;
+}
+
+// 전자계약(서명) 상태
+export const ESIGN_STATUS = {
+  NONE: '미발송',
+  WAITING: '서명대기',
+  SIGNED: '서명완료',
+};
+
+export const PAYMENT_METHODS = ['카드', '현금', '계좌이체'];
+
+// 계약목록 날짜검색 기준
+export const DATE_TYPES = [
+  { value: 'contractDate', label: '계약일' },
+  { value: 'scheduleDate', label: '시공예정일' },
+  { value: 'completedDate', label: '시공완료일' },
+  { value: 'canceledDate', label: '취소일' },
+  { value: 'moveInDate', label: '입주예정일' },
+  { value: 'createdAt', label: '등록일' },
+];
+
+export const SORT_OPTIONS = [
+  { value: 'no_desc', label: '번호순(최신)' },
+  { value: 'no_asc', label: '번호순(과거)' },
+  { value: 'scheduleDate_asc', label: '시공예정일순' },
+];
+
+export const MAX_SCHEDULE_STEPS = 3;
+
+// 사용자관리: 부서 / 직책 (선택 목록)
+export const DEPARTMENTS = ['본사', '지부', '협력업체', '기타', '상담팀', '시공팀', '박람회팀'];
+export const POSITIONS = ['대표', '지부장', '이사', '상무', '전무', '실장', '부장', '차장', '과장', '대리', '주임', '사원', '팀장', '줄눈시공팀', '나노시공팀', '탄성시공팀', '청소시공팀', '기타'];
