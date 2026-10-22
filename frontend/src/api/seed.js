@@ -2,7 +2,7 @@
 // 데이터 초기화 · 마이그레이션 · 샘플 데이터 (브라우저/서버 공용)
 //
 // 테이블: companies / users / engineers / engineer_offs / teams / products /
-//         apartments / customers / contracts / notifications / purchases
+//         apartments / customers / contracts / notifications / purchases / stocks
 // 브라우저 데모 모드와 서버(PostgreSQL) 모두 같은 형태의 데이터를 사용합니다.
 // ============================================================
 
@@ -26,6 +26,7 @@ export const TABLES = [
   'notifications',
   'paymentReceipts', // 입금 영수증 사진 (계약과 분리 저장)
   'purchases', // 매입 (통계정보 > 매입관리)
+  'stocks', // 재고 품목 + 입출고 기록 (통계정보 > 재고체크)
 ];
 
 export function emptyDb() {
@@ -71,6 +72,10 @@ export function migrate(db) {
   }
   if (!db.purchases) {
     db.purchases = [];
+    changed = true;
+  }
+  if (!db.stocks) {
+    db.stocks = [];
     changed = true;
   }
   db.users.forEach((u) => {

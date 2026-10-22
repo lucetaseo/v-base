@@ -4655,3 +4655,28 @@ input[type='month'] {
     grid-column: 1 / -1;
   }
 }
+
+/* 통계정보 > 재고체크: 선택한 품목의 입출고 */
+.stock-panel {
+  margin-top: 18px;
+  padding: 14px;
+  border: 1px solid #c7d7fe;
+  border-radius: 8px;
+  background: #fbfcff;
+}
+
+.stock-panel h3 {
+  margin: 0 0 4px;
+  font-size: 16px;
+}
+
+.stock-move-types {
+  display: flex;
+  gap: 6px;
+  align-items: end;
+  grid-column: span 2;
+}
+
+.stock-move-types .radio-tag {
+  white-space: nowrap;
+}

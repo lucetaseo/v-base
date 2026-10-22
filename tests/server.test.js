@@ -51,7 +51,7 @@ before(async () => {
   const c = new pg.Client({ connectionString: url });
   await c.connect();
   await c.query(`DROP TABLE IF EXISTS meta, companies, users, engineers, engineer_offs, teams, products,
-    apartments, customers, contracts, notifications, contract_signatures, payment_receipts, purchases CASCADE`);
+    apartments, customers, contracts, notifications, contract_signatures, payment_receipts, purchases, stocks CASCADE`);
   await c.end();
 });
 
@@ -587,6 +587,51 @@ test('매입관리: 관리자 등록·수정·삭제, 기간 조회, 권한 없�
   assert.equal((await other.ok('purchases', 'list', {})).length, 0, '다른 업체 매입은 안 보임');
   const mine = (await boss.ok('purchases', 'list', {}))[0];
   assert.equal((await other('purchases', 'remove', mine.id)).status, 404, '다른 업체 매입 삭제 불가');
+});
+
+test('재고체크: 품목 등록(처음 수량), 입고·사용·실사로 현재고 계산, 매입과 연결된 입고, 기록 있는 품목은 사용 안 함', async () => {
+  const boss = client();
+  await boss.ok('auth', 'login', 'admin', 'admin1234');
+  const paint = await boss.ok('stocks', 'saveItem', { name: '탄성 페인트', spec: '화이트 18L', unit: '통', minQty: 3, startQty: 5, startDate: '2026-09-30' });
+  assert.equal(paint.qty, 5, '처음 수량');
+  assert.equal((await boss('stocks', 'saveItem', { name: '탄성 페인트', spec: '화이트 18L' })).status, 400, '같은 이름·규격 중복');
+
+  await boss.ok('stocks', 'addMove', paint.id, { date: '2026-10-01', type: '사용', qty: 2, memo: '현장' });
+  let it = await boss.ok('stocks', 'addMove', paint.id, { date: '2026-10-02', type: '입고', qty: '1.5' });
+  assert.equal(it.qty, 4.5, '5 - 2 + 1.5');
+  it = await boss.ok('stocks', 'addMove', paint.id, { date: '2026-10-03', type: '실사', qty: 4 });
+  assert.equal(it.qty, 4, '실사 수량으로 맞춤');
+  assert.equal((await boss('stocks', 'addMove', paint.id, { date: '2026-10-03', type: '도난', qty: 1 })).status, 400, '모르는 종류');
+  assert.equal((await boss('stocks', 'addMove', paint.id, { date: '2026-10-03', type: '사용', qty: 0 })).status, 400, '0 사용');
+
+  // 매입하면서 입고 → 재고 증가, 매입 수정·삭제 시 같이 반영
+  const buy = await boss.ok('purchases', 'save', { date: '2026-10-04', item: '페인트 구매', amount: 300000, stockItemId: paint.id, stockQty: 3 });
+  assert.equal(buy.stockQty, 3);
+  const qtyNow = async () => (await boss.ok('stocks', 'list', {})).find((r) => r.id === paint.id).qty;
+  assert.equal(await qtyNow(), 7, '매입 입고 +3');
+  const linked = (await boss.ok('stocks', 'list', {})).find((r) => r.id === paint.id).moves.find((m) => m.purchaseId === buy.id);
+  assert.equal((await boss('stocks', 'removeMove', paint.id, linked.id)).status, 400, '매입 연결 입고는 재고에서 못 지움');
+  await boss.ok('purchases', 'save', { ...buy, stockQty: 2 });
+  assert.equal(await qtyNow(), 6, '매입 수정 → 입고 2로');
+  await boss.ok('purchases', 'remove', buy.id);
+  assert.equal(await qtyNow(), 4, '매입 삭제 → 입고도 삭제');
+
+  const first = (await boss.ok('stocks', 'list', {})).find((r) => r.id === paint.id).moves[1];
+  await boss.ok('stocks', 'removeMove', paint.id, first.id);
+  await boss.ok('stocks', 'removeItem', paint.id);
+  assert.equal((await boss.ok('stocks', 'list', {})).length, 0, '기록 있는 품목은 숨김(사용 안 함)');
+  assert.equal((await boss.ok('stocks', 'list', { includeInactive: true }))[0].active, false);
+  const empty = await boss.ok('stocks', 'saveItem', { name: '마스킹테이프' });
+  await boss.ok('stocks', 'removeItem', empty.id);
+  assert.equal((await boss.ok('stocks', 'list', { includeInactive: true })).length, 1, '기록 없는 품목은 삭제');
+
+  const mgr = client();
+  await mgr.ok('auth', 'login', 'buymgr', 'buy12345'); // 매입관리 시험의 실장 (재고 권한 없음)
+  assert.equal((await mgr('stocks', 'list', {})).status, 403, '재고 권한 없으면 차단');
+  const other = client();
+  await other.ok('auth', 'login', 'otheradmin', 'other1234', 'other-co');
+  assert.equal((await other.ok('stocks', 'list', { includeInactive: true })).length, 0, '다른 업체 재고는 안 보임');
+  assert.equal((await other('stocks', 'addMove', paint.id, { date: '2026-10-05', type: '입고', qty: 1 })).status, 404, '다른 업체 품목 기록 불가');
 });
 
 test('입금 영수증 사진 여러 장: 추가·일부 삭제·최대 5장, 계약 수정 뒤에도 사진 수 유지', async () => {

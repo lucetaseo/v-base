@@ -17,6 +17,7 @@ import ScheduleManagement from './components/ScheduleManagement.jsx';
 import ProgressStatus from './components/ProgressStatus.jsx';
 import StatsPage from './pages/StatsPage.jsx';
 import PurchasePage from './pages/PurchasePage.jsx';
+import StockPage from './pages/StockPage.jsx';
 import AccountManagement from './pages/AccountManagement.jsx';
 import SettingsPage from './pages/SettingsPage.jsx';
 import ImportPage from './pages/settings/ImportPage.jsx';
@@ -50,6 +51,7 @@ const MENUS = [
     subs: [
       { key: 'statsMain', label: '통계정보', path: '/stats', exact: true },
       { key: 'purchases', label: '매입관리', path: '/stats/purchases', perm: 'purchase.manage' },
+      { key: 'stock', label: '재고체크', path: '/stats/stock', perm: 'stock.manage' },
     ],
   },
   // 운영자 전용 (업체 관리자는 설정 > 사용자관리 에서 실장을 관리)
@@ -265,8 +267,7 @@ function MainLayout({ route }) {
         {current?.key === 'customer' && <CustomerManagement route={route} />}
         {current?.key === 'schedule' && <ScheduleManagement />}
         {current?.key === 'progress' && <ProgressStatus />}
-        {current?.key === 'stats' &&
-          (path.startsWith('/stats/purchases') && current.subs.some((s) => s.key === 'purchases') ? <PurchasePage /> : <StatsPage />)}
+        {current?.key === 'stats' && <StatsSubPage path={path} subs={current.subs} />}
         {current?.key === 'accounts' && <AccountManagement />}
         {current?.key === 'alimtalk' && <AlimtalkSettings />}
         {current?.key === 'terms' && <ContractTermsSettings />}
@@ -274,6 +275,14 @@ function MainLayout({ route }) {
       </main>
     </div>
   );
+}
+
+// 통계정보 하위 화면 (권한 없는 하위 메뉴 주소는 통계정보로)
+function StatsSubPage({ path, subs }) {
+  const has = (key) => subs.some((s) => s.key === key);
+  if (path.startsWith('/stats/purchases') && has('purchases')) return <PurchasePage />;
+  if (path.startsWith('/stats/stock') && has('stock')) return <StockPage />;
+  return <StatsPage />;
 }
 
 function SettingPage({ path, subs }) {

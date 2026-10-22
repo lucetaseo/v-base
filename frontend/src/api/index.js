@@ -24,6 +24,7 @@ export const {
   products,
   apartments,
   purchases,
+  stocks,
   customers,
   contracts,
   esign,

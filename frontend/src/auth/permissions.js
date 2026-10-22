@@ -45,6 +45,7 @@ export const PERMISSIONS = [
   { key: 'excel.export', group: '기타', label: '엑셀 다운로드', short: '엑셀' },
   { key: 'stats.view', group: '기타', label: '진행상황/통계 조회', short: '통계' },
   { key: 'purchase.manage', group: '기타', label: '매입 등록/조회 (통계정보 > 매입관리, 통계의 매입·차액)', short: '매입' },
+  { key: 'stock.manage', group: '기타', label: '재고 등록/입고·사용·실사 (통계정보 > 재고체크)', short: '재고' },
   { key: 'settings.manage', group: '설정', label: '기사/팀/상품/아파트 관리', short: '기초설정' },
 ];
 
