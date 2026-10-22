@@ -4918,3 +4918,25 @@ input[type='month'] {
   gap: 8px;
   align-items: center;
 }
+
+/* 데이터 가져오기 제목 번호: 누르면 양식 받기 */
+a.import-no {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: #1a6fe0;
+  color: #fff;
+  font-size: 14px;
+  text-decoration: none;
+}
+
+a.import-no:hover {
+  background: #1557b8;
+}
+
+.import-file-row a.btn-outline-action {
+  text-decoration: none;
+}
