@@ -24,7 +24,7 @@ import {
 import { ROLES, DATA_SCOPES, permissionsOf, isOwnScopeOnly, ALL_PERMISSION_KEYS, can } from '../auth/permissions.js';
 import { digitsOnly, formatPhone } from '../utils/format.js';
 import { today } from '../utils/date.js';
-import { CATEGORIES, DEPARTMENTS, PURCHASE_CATEGORIES, brandTerms, termsSource } from '../constants.js';
+import { CATEGORIES, COMPANY_DOC_FIELDS, DEPARTMENTS, PURCHASE_CATEGORIES, brandTerms, termsSource } from '../constants.js';
 import { AUDIT_KEEP_DAYS, auditText } from './audit.js';
 import {
   ApiError,
@@ -205,6 +205,8 @@ export const companies = {
       ceo: company.ceo || '',
       bizNo: company.bizNo || '',
       address: company.address || '',
+      // 계약서 하단 업체 정보 (업태·종목·고객센터·휴대번호·빠른문의)
+      ...Object.fromEntries(COMPANY_DOC_FIELDS.map((k) => [k, String(company[k] || '').trim()])),
       brands: company.brands?.length ? company.brands : [company.name.trim()],
       periodStart: company.periodStart,
       periodEnd: company.periodEnd,
@@ -225,7 +227,7 @@ export const companies = {
     const c = db.companies.find((x) => x.id === id);
     if (!c) throw new ApiError('업체를 찾을 수 없습니다.', 'NOT_FOUND');
     if ('code' in patch) patch = { ...patch, code: normalizeCode(db, patch.code, c.id) };
-    const allowed = ['code', 'name', 'ceo', 'bizNo', 'address', 'brands', 'periodStart', 'periodEnd', 'active'];
+    const allowed = ['code', 'name', 'ceo', 'bizNo', 'address', ...COMPANY_DOC_FIELDS, 'brands', 'periodStart', 'periodEnd', 'active'];
     allowed.forEach((k) => {
       if (k in patch) c[k] = patch[k];
     });
@@ -525,6 +527,7 @@ export const products = masterTable('products', {
     detail: d.detail || '',
     freeDetail: d.freeDetail || '', // 무료시공내역
     price: Math.max(0, Number(d.price) || 0),
+    warranty: String(d.warranty || '').trim().slice(0, 30), // 품질보증 A/S 기간 (탄성·페인트 계약서)
     visible: d.visible !== false,
   }),
 });

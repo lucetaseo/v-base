@@ -634,6 +634,39 @@ test('재고체크: 품목 등록(처음 수량), 입고·사용·실사로 현�
   assert.equal((await other('stocks', 'addMove', paint.id, { date: '2026-10-05', type: '입고', qty: 1 })).status, 404, '다른 업체 품목 기록 불가');
 });
 
+test('탄성·페인트 계약서: 제품별 시공장소·품질보증·구역, AS 보장·후기 페이백 저장, 상품 품질보증, 업체 정보', async () => {
+  const boss = client();
+  await boss.ok('auth', 'login', 'admin', 'admin1234');
+  const prod = await boss.ok('products', 'save', { name: '에코그리트', category: '탄성', price: 500000, warranty: '10년' });
+  assert.equal(prod.warranty, '10년');
+  const c = await boss.ok('contracts', 'create', {
+    ...base,
+    customerName: '탄성고객',
+    category: '탄성',
+    asCoverage: true,
+    reviewPayback: true,
+    lineItems: [
+      { productId: prod.id, name: '에코그리트', qty: 1, unitPrice: 500000, places: ['세탁실', '베란다', '거실'], warranty: '10년', zone: '앞뒤 베란다' },
+      { name: '곰팡이방지 살균시공 (드레스룸)', qty: 1, unitPrice: 150000 },
+    ],
+  });
+  const got = await boss.ok('contracts', 'get', c.id);
+  assert.deepEqual(got.lineItems[0].places, ['베란다', '세탁실'], '정해진 장소만, 정해진 순서로');
+  assert.equal(got.lineItems[0].zone, '앞뒤 베란다');
+  assert.equal(got.lineItems[1].places, undefined, '장소 없는 줄은 그대로');
+  assert.equal(got.totalAmount, 650000, '곰팡이방지 포함 합계');
+  assert.equal(got.asCoverage, true);
+  assert.equal(got.reviewPayback, true);
+  assert.equal((await boss.ok('contracts', 'create', { ...base, customerName: '구분없음' })).category, '탄성', '구분 기본값 = 탄성(맨 앞)');
+
+  const sup = client();
+  await sup.ok('auth', 'login', 'super', 'super-test-1234');
+  const [co] = await sup.ok('companies', 'list');
+  const up = await sup.ok('companies', 'update', co.id, { bizType: '건설업', bizItem: '페인트, 도장', csPhone: '1599-0000' });
+  assert.equal(up.bizType, '건설업');
+  assert.equal(up.csPhone, '1599-0000');
+});
+
 test('입금 영수증 사진 여러 장: 추가·일부 삭제·최대 5장, 계약 수정 뒤에도 사진 수 유지', async () => {
   const img = (n) => 'data:image/jpeg;base64,' + Buffer.from(`fake-jpeg-${n}`).toString('base64');
   const c = await admin.ok('contracts', 'create', { ...base, customerName: '여러장고객', customerPhone: '010-7777-9090', totalAmount: 900000 });
