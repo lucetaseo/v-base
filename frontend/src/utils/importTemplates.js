@@ -1,5 +1,5 @@
 // ============================================================
-// 데이터 가져오기 양식 (설정 > 데이터 가져오기의 [양식 받기])
+// 데이터 가져오기 양식 (설정 > 데이터 가져오기의 [양식 받기] · 제목 번호)
 //   첫 시트: 제목 줄 + 예시 줄 (예시 줄은 지우고 채워 넣음)
 //   둘째 시트 '작성 방법': 칸마다 필수 여부·설명
 //   계약 양식은 예전 프로그램 파일이 없는 업체가 직접 엑셀로 옮길 때 사용 (mapSheetContractRow)
@@ -59,7 +59,11 @@ export const TEMPLATES = {
   },
 };
 
-export function downloadTemplate(kind) {
+// 양식 엑셀 파일 (frontend/public/templates/{kind}.xlsx 로 미리 만들어 둠 → 화면에서는 링크로 내려받기)
+//   칸을 바꾸면: npm run templates --prefix frontend 로 파일을 다시 만듭니다
+export const templateUrl = (kind) => `/templates/${kind}.xlsx`;
+
+export function buildTemplateWorkbook(kind) {
   const t = TEMPLATES[kind];
   const sheet = XLSX.utils.aoa_to_sheet([t.columns.map((c) => c[0]), t.columns.map((c) => c[3])]);
   sheet['!cols'] = t.columns.map((c) => ({ wch: Math.max(10, c[0].length * 2 + 4, String(c[3]).length + 2) }));
@@ -73,7 +77,7 @@ export function downloadTemplate(kind) {
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, sheet, '입력');
   XLSX.utils.book_append_sheet(wb, guide, '작성 방법');
-  XLSX.writeFile(wb, `${t.file}.xlsx`);
+  return wb;
 }
 
 // 엑셀 첫 시트 → 제목 줄 기준 객체 목록 (날짜 칸은 2026-10-22 글자로)

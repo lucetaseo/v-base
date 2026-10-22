@@ -5,7 +5,7 @@ import { useAuth } from '../../auth/AuthContext.jsx';
 import { categoriesFromName, mapLegacyRow, parseLegacyHtml } from '../../utils/legacyImport.js';
 import { won } from '../../utils/format.js';
 import { CATEGORIES } from '../../constants.js';
-import { downloadTemplate, mapSheetContractRow, readSheetRows } from '../../utils/importTemplates.js';
+import { TEMPLATES, mapSheetContractRow, readSheetRows, templateUrl } from '../../utils/importTemplates.js';
 
 // 설정 > 데이터 가져오기 (관리자 전용)
 //   1) 기사 목록 (엑셀/CSV: 이름, 아이디, 연락처)
@@ -40,6 +40,21 @@ const readFile = (file, as) =>
     else r.readAsArrayBuffer(file);
   });
 
+// 양식 엑셀 내려받기 링크 (public/templates/{kind}.xlsx, 받는 파일 이름은 한글)
+const templateLink = (kind) => ({ href: templateUrl(kind), download: `${TEMPLATES[kind].file}.xlsx` });
+
+// 제목: 앞 번호를 누르면 그 가져오기 양식이 받아짐
+function ImportTitle({ no, kind, children }) {
+  return (
+    <h3>
+      <a className="import-no" {...templateLink(kind)} title="눌러서 양식 엑셀 받기">
+        {no}
+      </a>{' '}
+      {children}
+    </h3>
+  );
+}
+
 // [파일 선택] 옆 [양식 받기]: 칸 이름·예시가 들어 있는 엑셀
 function FilePick({ kind, accept, onPick }) {
   return (
@@ -48,9 +63,9 @@ function FilePick({ kind, accept, onPick }) {
         파일 선택
         <input type="file" accept={accept} onChange={onPick} hidden />
       </label>
-      <button type="button" className="btn-outline-action" onClick={() => downloadTemplate(kind)}>
+      <a className="btn-outline-action" {...templateLink(kind)}>
         📄 양식 받기 (엑셀)
-      </button>
+      </a>
     </div>
   );
 }
@@ -64,6 +79,7 @@ export default function ImportPage() {
           <li>예전 프로그램의 기사·계약 자료를 한 번에 옮기는 화면입니다. <b>기사 목록을 먼저</b> 가져온 뒤 계약을 가져오세요.</li>
           <li>파일을 고르면 먼저 <b>미리보기</b>가 나오고, [가져오기]를 눌러야 실제로 저장됩니다.</li>
           <li>같은 파일을 다시 올려도 이미 가져온 기사(같은 이름)·계약(같은 예전 번호)은 건너뛰어 중복되지 않습니다.</li>
+          <li>칸 이름을 모르면 제목 앞 <b>번호</b>나 <b>[양식 받기]</b>를 눌러 양식 엑셀을 받아 채우세요. 두 번째 시트 '작성 방법'에 칸별 설명이 있습니다.</li>
           <li>기사 비밀번호는 가져오지 않습니다. 기사모바일을 쓰려면 [기사관리]에서 기사별 비밀번호를 정해 주세요.</li>
         </ul>
       </div>
@@ -117,7 +133,7 @@ function EngineerImport() {
 
   return (
     <section className="import-box">
-      <h3>1. 기사 목록</h3>
+      <ImportTitle no="1" kind="engineers">기사 목록</ImportTitle>
       <p className="sub-text">엑셀(.xlsx) 또는 CSV. 첫 줄 제목: <b>이름, 아이디, 연락처</b> (담당시공은 선택). 담당시공 칸이 비어 있으면 이름 앞 표시(줄)·청)·코)·탄))로 자동 지정됩니다.</p>
       <FilePick kind="engineers" accept=".xlsx,.xls,.csv" onPick={pick} />
       {rows && (
@@ -237,7 +253,7 @@ function ContractImport() {
 
   return (
     <section className="import-box">
-      <h3>2. 계약</h3>
+      <ImportTitle no="2" kind="contracts">계약</ImportTitle>
       <p className="sub-text">
         예전 프로그램 [계약관리 → 엑셀다운로드]로 받은 .xls 파일을 그대로 올리거나, <b>[양식 받기]</b>로 받은 엑셀에 계약을 채워 올리세요. 양식의 필수 칸: <b>계약일, 고객명, 연락처, 아파트명</b> (두 번째 시트 '작성 방법'에 칸별 설명).
       </p>
@@ -322,7 +338,7 @@ function UserImport() {
 
   return (
     <section className="import-box">
-      <h3>3. 직원 계정</h3>
+      <ImportTitle no="3" kind="users">직원 계정</ImportTitle>
       <p className="sub-text">
         엑셀 첫 줄 제목: <b>이름, 아이디, 비밀번호, 부서, 직급</b>. 부서가 <b>시공팀</b>이면 기사모바일 계정(같은 이름의 기사에 연결, 없으면 새 기사), 나머지는 <b>실장 계정(기본 권한)</b>으로 만듭니다. 권한은 [사용자관리]에서 바꿔 주세요. 이미 있는 아이디는 건너뜁니다.
       </p>
