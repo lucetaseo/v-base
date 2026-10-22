@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { purchases } from '../api/index.js';
+import { purchases, stocks } from '../api/index.js';
 import { useAuth } from '../auth/AuthContext.jsx';
 import { PURCHASE_CATEGORIES } from '../constants.js';
 import { presetRange, today } from '../utils/date.js';
@@ -7,7 +7,7 @@ import { won } from '../utils/format.js';
 import { downloadExcel } from '../utils/excel.js';
 
 // 통계정보 > 매입관리: 자재·인건비 등 쓴 비용을 적어 두면 통계정보에서 매출과 비교 (차액)
-const emptyForm = () => ({ date: today(), category: '공통', vendor: '', item: '', amount: '', memo: '' });
+const emptyForm = () => ({ date: today(), category: '공통', vendor: '', item: '', amount: '', memo: '', stockItemId: '', stockQty: '' });
 
 export default function PurchasePage() {
   const { can, handleError } = useAuth();
@@ -15,6 +15,17 @@ export default function PurchasePage() {
   const [rows, setRows] = useState([]);
   const [form, setForm] = useState(emptyForm);
   const [saving, setSaving] = useState(false);
+  const canStock = can('stock.manage'); // 매입하면서 재고 입고도 함께 (재고체크)
+  const [stockItems, setStockItems] = useState([]);
+  const loadStocks = useCallback(() => (canStock ? stocks.list().then(setStockItems).catch(handleError) : Promise.resolve()), [canStock, handleError]);
+  useEffect(() => {
+    loadStocks();
+  }, [loadStocks]);
+  const stockName = (id) => {
+    const it = stockItems.find((x) => x.id === id);
+    return it ? `${it.name}${it.spec ? ` (${it.spec})` : ''}` : '재고';
+  };
+  const stockUnit = (id) => stockItems.find((x) => x.id === Number(id))?.unit || '';
 
   const load = useCallback(() => purchases.list({ from: range[0], to: range[1] }).then(setRows).catch(handleError), [range, handleError]);
   useEffect(() => {
@@ -29,7 +40,7 @@ export default function PurchasePage() {
     try {
       await purchases.save({ ...form, amount: String(form.amount).replace(/,/g, '') });
       setForm((f) => ({ ...emptyForm(), date: f.id ? today() : f.date, category: f.category })); // 연달아 적기 쉽게 날짜·구분 유지
-      await load();
+      await Promise.all([load(), loadStocks()]);
     } catch (err) {
       handleError(err);
     } finally {
@@ -42,7 +53,7 @@ export default function PurchasePage() {
     try {
       await purchases.remove(r.id);
       if (form.id === r.id) setForm(emptyForm());
-      await load();
+      await Promise.all([load(), loadStocks()]);
     } catch (err) {
       handleError(err);
     }
@@ -57,6 +68,7 @@ export default function PurchasePage() {
       <ul className="notice-list">
         <li>자재비·인건비 등 매입(쓴 비용)을 날짜별로 입력합니다.</li>
         <li>입력한 매입은 [통계정보]에서 같은 기간의 매출과 함께 합계·차액(매출 − 매입)으로 보여집니다.</li>
+        {canStock && <li>페인트 등 재고 품목을 사면 [재고 입고]에서 품목과 수량을 고르세요. [재고체크]에 입고가 함께 기록됩니다.</li>}
       </ul>
 
       <form className="purchase-form" onSubmit={submit}>
@@ -95,6 +107,35 @@ export default function PurchasePage() {
           <span>메모</span>
           <input className="input-text" value={form.memo} onChange={(e) => setField('memo', e.target.value)} />
         </label>
+        {canStock && (
+          <>
+            <label>
+              <span>재고 입고 (선택)</span>
+              <select className="input-select" value={form.stockItemId || ''} onChange={(e) => setField('stockItemId', e.target.value ? Number(e.target.value) : '')}>
+                <option value="">재고에 넣지 않음</option>
+                {stockItems.map((it) => (
+                  <option key={it.id} value={it.id}>
+                    {it.name}
+                    {it.spec ? ` (${it.spec})` : ''}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {form.stockItemId && (
+              <label>
+                <span>입고 수량({stockUnit(form.stockItemId)})</span>
+                <input
+                  className="input-text text-right"
+                  inputMode="decimal"
+                  value={form.stockQty}
+                  onChange={(e) => setField('stockQty', e.target.value.replace(/[^\d.]/g, ''))}
+                  placeholder="0"
+                  required
+                />
+              </label>
+            )}
+          </>
+        )}
         <div className="purchase-form-actions">
           <button type="submit" className="btn-dark-lg sm" disabled={saving}>
             {form.id ? '수정 저장' : '+ 매입 등록'}
@@ -172,11 +213,18 @@ export default function PurchasePage() {
                 <td className="nowrap">{r.date}</td>
                 <td className="nowrap">{r.category}</td>
                 <td>{r.vendor || '-'}</td>
-                <td className="text-left">{r.item}</td>
+                <td className="text-left">
+                  {r.item}
+                  {r.stockItemId && (
+                    <div className="sub-text">
+                      재고 입고: {stockName(r.stockItemId)} +{r.stockQty}
+                    </div>
+                  )}
+                </td>
                 <td className="text-right nowrap">{won(r.amount)}</td>
                 <td className="text-left">{r.memo}</td>
                 <td className="nowrap">
-                  <button type="button" className="btn-link" onClick={() => setForm({ ...r, amount: String(r.amount) })}>
+                  <button type="button" className="btn-link" onClick={() => setForm({ ...r, amount: String(r.amount), stockItemId: r.stockItemId || '', stockQty: r.stockQty ? String(r.stockQty) : '' })}>
                     수정
                   </button>{' '}
                   <button type="button" className="btn-text-danger" onClick={() => remove(r)}>
