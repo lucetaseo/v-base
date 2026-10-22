@@ -3,7 +3,7 @@
 export const BRANDS = ['더좋은집', '더스타트'];
 
 // 구분 (품목)
-export const CATEGORIES = ['탄성', '줄눈', '청소', '새집증후군', '나노코팅', '페인트', '기타'];
+export const CATEGORIES = ['탄성', '줄눈', '청소', '나노코팅', '페인트', '기타'];
 
 // 탄성·페인트 계약서 (신화탄성 양식): 제품별 시공장소 체크, 품질보증, 구역 / 곰팡이방지 살균시공 / AS 보장범위
 export const PAINT_STYLE_CATEGORIES = ['탄성', '페인트'];
