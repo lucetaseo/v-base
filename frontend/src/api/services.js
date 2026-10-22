@@ -23,7 +23,7 @@ import {
 } from './runtime.js';
 import { ROLES, DATA_SCOPES, permissionsOf, isOwnScopeOnly, ALL_PERMISSION_KEYS } from '../auth/permissions.js';
 import { digitsOnly, formatPhone } from '../utils/format.js';
-import { CATEGORIES, DEPARTMENTS, brandTerms, termsSource } from '../constants.js';
+import { CATEGORIES, DEPARTMENTS, PURCHASE_CATEGORIES, brandTerms, termsSource } from '../constants.js';
 import { AUDIT_KEEP_DAYS, auditText } from './audit.js';
 import {
   ApiError,
@@ -553,6 +553,60 @@ export const apartments = {
     });
     saveDb(db);
     return { created: names.length };
+  },
+};
+
+// ============================================================
+// 매입 (통계정보 > 매입관리): 자재·인건비 등 업체가 쓴 비용을 날짜별로 적어 두고 통계에서 매출과 비교
+//   조회·등록·수정·삭제 모두 purchase.manage 권한
+// ============================================================
+function findPurchase(db, user, id) {
+  const row = db.purchases.find((r) => r.id === Number(id) && r.companyId === user.companyId);
+  if (!row) throw new ApiError('매입 내역을 찾을 수 없습니다.', 'NOT_FOUND');
+  return row;
+}
+
+export const purchases = {
+  async list({ from = '', to = '' } = {}) {
+    const { db, user } = await authorize('purchase.manage');
+    return clone(
+      db.purchases
+        .filter((r) => r.companyId === user.companyId && (!from || r.date >= from) && (!to || r.date <= to))
+        .sort((a, b) => b.date.localeCompare(a.date) || b.id - a.id), // 최근 날짜부터
+    );
+  },
+
+  async save(d = {}) {
+    const { db, user } = await authorize('purchase.manage');
+    const date = String(d.date || '').trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new ApiError('매입일을 입력해 주세요.');
+    const amount = Math.round(Number(String(d.amount ?? '').replace(/,/g, '')));
+    if (!Number.isFinite(amount) || amount <= 0) throw new ApiError('매입 금액을 1원 이상으로 입력해 주세요.');
+    const fields = {
+      date,
+      category: PURCHASE_CATEGORIES.includes(d.category) ? d.category : '공통',
+      vendor: String(d.vendor || '').trim(), // 거래처
+      item: required(d.item, '매입 내용(품목)을 입력해 주세요.'),
+      amount,
+      memo: String(d.memo || '').trim(),
+    };
+    let row;
+    if (d.id) {
+      row = findPurchase(db, user, d.id);
+      Object.assign(row, fields, { updatedAt: nowIso() });
+    } else {
+      row = { id: nextId(db, 'purchases'), companyId: user.companyId, ...fields, createdBy: user.id, createdAt: nowIso() };
+      db.purchases.push(row);
+    }
+    saveDb(db);
+    return clone(row);
+  },
+
+  async remove(id) {
+    const { db, user } = await authorize('purchase.manage');
+    const row = findPurchase(db, user, id);
+    db.purchases = db.purchases.filter((r) => r !== row);
+    saveDb(db);
   },
 };
 

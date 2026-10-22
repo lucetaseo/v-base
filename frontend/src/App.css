@@ -4603,3 +4603,55 @@ input[type='month'] {
   align-items: center;
   justify-content: center;
 }
+
+/* 통계정보 > 매입관리: 입력 줄 */
+.purchase-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 8px 10px;
+  align-items: end;
+  margin: 12px 0 16px;
+  padding: 12px;
+  border: 1px solid #dce1e8;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.purchase-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  color: #475569;
+}
+
+.purchase-form label.wide {
+  grid-column: span 2;
+}
+
+.purchase-form .input-text,
+.purchase-form .input-date,
+.purchase-form .input-select {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.purchase-form-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.customer-table tr.selected-row td {
+  background: #eef4ff;
+}
+
+/* 통계정보: 매출·매입·차액 */
+.amount-card.minus b {
+  color: #dc2626;
+}
+
+@media screen and (max-width: 768px) {
+  .purchase-form label.wide {
+    grid-column: 1 / -1;
+  }
+}
