@@ -519,6 +519,25 @@ body {
   color: #444444;
 }
 
+/* 상세일정 시공자 칸: 눌러서 바로 기사 변경 */
+.assign-select {
+  max-width: 140px;
+  padding: 5px 6px;
+  border: 1px solid #1a6fe0;
+  border-radius: 4px;
+  background: #f0f6ff;
+  color: #1a3d7c;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.assign-select.unassigned {
+  border-color: #e11d48;
+  background: #fff1f2;
+  color: #be123c;
+}
+
 .btn-talk-yellow {
   background-color: #facc15;
   border: none;
