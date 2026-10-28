@@ -5,7 +5,8 @@ import { API_MODE, companies } from '../api/index.js';
 // companyCode: 업체 주소(veritybase.vercel.app/업체주소)로 들어오면 그 업체 로그인 화면
 // engineer: /업체주소/m 으로 들어오면 기사모바일 로그인 (기사 계정만). 아니면 일반화면 (관리자·실장)
 //   기사 아이디와 직원 아이디가 같아도 로그인하는 주소로 구분됨
-export default function LoginPage({ companyCode = '', engineer = false }) {
+// signedInAs: 다른 업체 계정으로 로그인된 채 이 업체 주소로 들어온 경우 (onStay: 원래 계정 화면으로)
+export default function LoginPage({ companyCode = '', engineer = false, signedInAs = '', onStay }) {
   const memKey = engineer ? 'lastLoginId.engineer' : 'lastLoginId';
   const { login } = useAuth();
   const [company, setCompany] = useState(undefined); // undefined: 확인 중, null: 없는 주소
@@ -65,6 +66,14 @@ export default function LoginPage({ companyCode = '', engineer = false }) {
             {submitting ? '로그인 중...' : '로그인'}
           </button>
           {error && <p className="login-error">{error}</p>}
+          {signedInAs && (
+            <p className="login-other">
+              지금 {signedInAs} 계정으로 로그인되어 있습니다. 이 업체 계정으로 로그인하면 바뀝니다.{' '}
+              <button type="button" className="login-stay" onClick={onStay}>
+                원래 계정 화면으로
+              </button>
+            </p>
+          )}
         </form>
 
         <div className="login-footer">
