@@ -116,13 +116,24 @@ export default function App() {
 }
 
 // 로그인한 계정의 업체 주소(/thegood/...)로 맞춰서 보여줌. 운영자는 업체 코드 없는 주소(/admin)
+//   다른 업체 주소(/sinhwa)로 들어오면 주소를 바꾸지 않고 그 업체 로그인 화면 (받은 링크 그대로 보이게)
 function CompanyGate({ route }) {
   const { user, company } = useAuth();
   const code = user.role === ROLES.SUPER ? '' : company?.code || '';
-  const wrongBase = route.base !== code;
+  const otherCompany = route.base && route.base !== code;
+  const wrongBase = !otherCompany && route.base !== code;
   useEffect(() => {
     if (wrongBase) navigate(`${route.path}${window.location.search}`, { replace: true, base: code });
   }, [wrongBase, code, route.path]);
+  if (otherCompany)
+    return (
+      <LoginPage
+        companyCode={route.base}
+        engineer={route.path === '/m' || route.path.startsWith('/m/')}
+        signedInAs={company ? `${company.name} · ${user.name}` : user.name}
+        onStay={() => navigate(route.path, { replace: true, base: code })}
+      />
+    );
   if (wrongBase) return null;
   if (user.role === ROLES.ENGINEER) return <EngineerApp route={route} />;
   return <MainLayout route={route} />;

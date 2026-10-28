@@ -1080,6 +1080,30 @@ body {
   font-size: 14px;
 }
 
+/* 다른 업체 계정으로 로그인된 채 업체 주소로 들어온 경우 안내 */
+.login-other {
+  margin: 0;
+  background: rgba(255, 255, 255, 0.95);
+  color: #334155;
+  padding: 8px 10px;
+  border-radius: 4px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.login-form .login-stay {
+  height: auto;
+  padding: 0;
+  border: 0;
+  color: #1a6fe0;
+  font-size: 13px;
+  text-decoration: underline;
+}
+
+.login-form .login-stay:hover {
+  background: transparent;
+}
+
 /* 로그인 화면 구분: 일반화면 / 기사모바일 */
 .login-kind {
   display: inline-block;
