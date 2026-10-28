@@ -139,11 +139,34 @@ export default function ScheduleManagement() {
       navigateForward(`/contracts/${row.contract.id}/edit`);
       return;
     }
+    openAssign(row);
+  };
+  const openAssign = (row) =>
     setEditItem({
       ...row,
       engineerId: row.engineerId ? String(row.engineerId) : '',
       teamId: row.teamId ? String(row.teamId) : '',
     });
+  // 상세일정의 시공자 칸에서 바로 기사·팀 변경 (수정 버튼 없이 고르면 바로 저장, PC·모바일 공통)
+  const rowKey = (row) => `${row.contract.id}-${row.stepIndex}`;
+  const assignValueOf = (row) =>
+    row.assignType === ASSIGN_TYPES.TEAM && row.teamId ? `t:${row.teamId}` : row.engineerId ? `e:${row.engineerId}` : '';
+  const [assigning, setAssigning] = useState('');
+  const quickAssign = async (row, value) => {
+    const [kind, id] = value.split(':');
+    setAssigning(rowKey(row));
+    try {
+      await contractApi.updateSchedule(row.contract.id, row.stepIndex, {
+        assignType: kind === 't' ? ASSIGN_TYPES.TEAM : ASSIGN_TYPES.ENGINEER,
+        engineerId: kind === 'e' ? id : '',
+        teamId: kind === 't' ? id : '',
+      });
+      await load();
+    } catch (err) {
+      handleError(err);
+    } finally {
+      setAssigning('');
+    }
   };
   const editOffOf = (engineerId) => offs.find((o) => String(o.engineerId) === String(engineerId) && o.date === editItem?.date);
   const [editOffs, setEditOffs] = useState([]); // 수정 중인 날짜가 다른 달일 수 있어 별도 조회
@@ -224,6 +247,7 @@ export default function ScheduleManagement() {
         <ul className="notice-list">
           <li>계약서에 입력된 시공일정(1~3차)과 배정 기사, 기사 휴무가 날짜별로 표시됩니다.</li>
           <li>날짜를 클릭하면 우측에 상세 일정이 표시되며, 일정/기사 변경은 계약서에 바로 반영됩니다.</li>
+          {canEdit && <li>상세 일정의 시공자 칸을 누르면 수정 화면 없이 바로 기사를 바꿀 수 있습니다.</li>}
           <li>
             휴무는 <span className="off-chip off-DAY">종일</span> <span className="off-chip off-AM">오전</span>{' '}
             <span className="off-chip off-PM">오후</span>로 표시되며, 휴무 시간대에는 일정을 배정할 수 없습니다. (오전 = {settings.amEnd} 이전 시작)
@@ -383,7 +407,37 @@ export default function ScheduleManagement() {
                     details.map((row) => (
                       <tr key={`${row.contract.id}-${row.stepIndex}`}>
                         <td>{row.contract.category}</td>
-                        <td>{row.assigneeName || <span className="text-red">미배정</span>}</td>
+                        <td>
+                          {canEdit ? (
+                            <select
+                              className={`assign-select ${row.assigneeName ? '' : 'unassigned'}`}
+                              title="눌러서 바로 기사 변경"
+                              value={assignValueOf(row)}
+                              disabled={assigning === rowKey(row)}
+                              onChange={(e) => quickAssign(row, e.target.value)}
+                            >
+                              <option value="">미배정</option>
+                              {engineers.map((en) => {
+                                const off = (offsByDate[row.date] || []).find((o) => String(o.engineerId) === String(en.id));
+                                const blocked = off && offBlocks(off.period, slotOf(row, settings));
+                                return (
+                                  <option key={en.id} value={`e:${en.id}`} disabled={blocked && assignValueOf(row) !== `e:${en.id}`}>
+                                    {en.name}({en.category}){off ? ` — ${OFF_LABEL[off.period]}휴무` : ''}
+                                  </option>
+                                );
+                              })}
+                              {crewTeams.length > 0 && (
+                                <optgroup label="팀배정">
+                                  {crewTeams.map((t) => (
+                                    <option key={t.id} value={`t:${t.id}`}>{t.name}</option>
+                                  ))}
+                                </optgroup>
+                              )}
+                            </select>
+                          ) : (
+                            row.assigneeName || <span className="text-red">미배정</span>
+                          )}
+                        </td>
                         <td>{row.stepIndex + 1}차</td>
                         <td>{timeLabel(row) || '-'}</td>
                         <td>
