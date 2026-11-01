@@ -175,7 +175,7 @@ export const companies = {
   async publicInfo(code) {
     const db = await loadDb();
     const c = db.companies.find((x) => x.code && x.code === String(code || '').toLowerCase());
-    return c ? { code: c.code, name: c.name } : null;
+    return c ? { code: c.code, name: c.name, periodEnd: c.periodEnd || '' } : null; // periodEnd: 로그인 화면에 사용 가능 기한 표시
   },
 
   async list() {

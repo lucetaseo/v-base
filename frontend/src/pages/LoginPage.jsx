@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useAuth } from '../auth/AuthContext.jsx';
 import { API_MODE, companies } from '../api/index.js';
+import { today } from '../utils/date.js';
 
 // companyCode: 업체 주소(veritybase.vercel.app/업체주소)로 들어오면 그 업체 로그인 화면
 // engineer: /업체주소/m 으로 들어오면 기사모바일 로그인 (기사 계정만). 아니면 일반화면 (관리자·실장)
@@ -14,6 +15,9 @@ export default function LoginPage({ companyCode = '', engineer = false, signedIn
     if (!companyCode) return;
     companies.publicInfo(companyCode).then(setCompany).catch(() => setCompany(null));
   }, [companyCode]);
+  const daysLeft = company?.periodEnd
+    ? Math.ceil((new Date(`${company.periodEnd}T00:00:00`) - new Date(`${today()}T00:00:00`)) / 86400000)
+    : null;
   const [loginId, setLoginId] = useState(() => localStorage.getItem(memKey) || '');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -43,6 +47,12 @@ export default function LoginPage({ companyCode = '', engineer = false, signedIn
           <h1>{company ? `${company.name} VerityBase` : 'VerityBase'}</h1>
           <p className="login-kind">{engineer ? '기사모바일' : '일반화면'}</p>
           <p className="login-sub">{engineer ? '시공기사 전용 · 내 일정 확인과 완료 보고' : '전자계약 · 시공일정 관리 (관리자 · 실장)'}</p>
+          {!engineer && company?.periodEnd && (
+            <p className={`login-period ${daysLeft < 0 ? 'expired' : daysLeft <= 30 ? 'soon' : ''}`}>
+              사용 가능 기한: <span className="nowrap">{company.periodEnd}까지</span>{' '}
+              <span className="nowrap">{daysLeft < 0 ? '(만료됨)' : `(${daysLeft}일 남음)`}</span>
+            </p>
+          )}
           {companyCode && company === null && <p className="login-error">존재하지 않는 업체 주소입니다 ({companyCode}). 주소를 확인해 주세요.</p>}
         </div>
 

@@ -1123,6 +1123,28 @@ body {
   background: transparent;
 }
 
+/* 로그인 화면: 업체 사용 가능 기한 (30일 이내는 노란색, 만료는 빨간색) */
+.login-period {
+  display: inline-block;
+  margin: 8px 0 0;
+  padding: 4px 10px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.18);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.login-period.soon {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.login-period.expired {
+  background: #fff1f2;
+  color: #be123c;
+}
+
 /* 로그인 화면 구분: 일반화면 / 기사모바일 */
 .login-kind {
   display: inline-block;
