@@ -14,6 +14,17 @@
   },
   "rewrites": [
     {
+      "source": "/:path((?!api/|assets/|templates/).*)",
+      "has": [
+        {
+          "type": "header",
+          "key": "user-agent",
+          "value": "(?i).*(kakaotalk-scrap|facebookexternalhit|twitterbot|slackbot|discordbot|telegrambot|whatsapp|line-poker|yeti|daum|bingbot|googlebot).*"
+        }
+      ],
+      "destination": "/api/page?path=/:path"
+    },
+    {
       "source": "/((?!api/).*)",
       "destination": "/index.html"
     }
