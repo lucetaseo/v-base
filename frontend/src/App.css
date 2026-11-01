@@ -5037,3 +5037,8 @@ a.import-no:hover {
   font-weight: 700;
   cursor: pointer;
 }
+
+/* 계약 등록 현장 줄: '타입 [ ] 평 [ ]' 묶음 사이 간격 */
+.field-pair {
+  margin-left: 10px;
+}
