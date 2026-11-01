@@ -455,9 +455,13 @@ export default function ContractEditor({ contractId, prefillFrom, prefillCategor
                 <AptSearchInput value={form.aptName} onChange={(v) => set('aptName', v)} required />
                 <input className="input-text" name="dong" value={form.dong} onChange={onField} style={{ width: 70 }} /> 동
                 <input className="input-text" name="ho" value={form.ho} onChange={onField} style={{ width: 70 }} /> 호
-                <span>타입</span>
-                <input className="input-text" name="aptType" value={form.aptType} onChange={onField} style={{ width: 80 }} />
-                <input className="input-text" name="area" value={form.area} onChange={onField} style={{ width: 60 }} /> 평
+                {/* 타입·평은 칸 앞에 이름을 붙여 헷갈리지 않게: 타입 [  ] 평 [  ] */}
+                <span className="nowrap field-pair">
+                  타입 <input className="input-text" name="aptType" value={form.aptType} onChange={onField} style={{ width: 80 }} placeholder="예: 84A" />
+                </span>
+                <span className="nowrap field-pair">
+                  평 <input className="input-text" name="area" value={form.area} onChange={onField} style={{ width: 60 }} placeholder="예: 34" />
+                </span>
               </td>
             </tr>
             <tr>
