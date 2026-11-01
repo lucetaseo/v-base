@@ -3,9 +3,10 @@ import { linkProps, match, navigate, useRoute } from './router.js';
 import './App.css';
 
 import { useAuth } from './auth/AuthContext.jsx';
-import { API_MODE } from './api/index.js';
+import { API_MODE, companies } from './api/index.js';
 import { ROLES, ROLE_LABELS } from './auth/permissions.js';
 import { formatKoreanDate, today } from './utils/date.js';
+import { pageTitle } from './utils/pageTitle.js';
 
 import LoginPage from './pages/LoginPage.jsx';
 import SignPage from './pages/SignPage.jsx';
@@ -92,7 +93,23 @@ const SETTING_PAGES = {
 
 export default function App() {
   const route = useRoute();
-  const { user, loading } = useAuth();
+  const { user, company, loading } = useAuth();
+
+  // 브라우저 탭 제목: 링크(화면)마다 다르게 — 예) "신화탄성 기사모바일 | VerityBase"
+  //   로그인한 업체면 그 이름, 아니면 주소의 업체 코드로 이름 조회
+  const ownName = user && user.role !== ROLES.SUPER && company?.code === route.base ? company.name : '';
+  const [baseName, setBaseName] = useState({ code: '', name: '' });
+  useEffect(() => {
+    if (!route.base || ownName || baseName.code === route.base) return;
+    companies
+      .publicInfo(route.base)
+      .then((c) => setBaseName({ code: route.base, name: c?.name || '' }))
+      .catch(() => setBaseName({ code: route.base, name: '' }));
+  }, [route.base, ownName]); // eslint-disable-line react-hooks/exhaustive-deps
+  const titleName = ownName || (baseName.code === route.base ? baseName.name : '');
+  useEffect(() => {
+    document.title = pageTitle(route, titleName);
+  }, [route.base, route.path, titleName]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // 고객 전자서명 페이지는 로그인 없이 접근 (/sign/토큰). 예전 형식(#/sign/토큰) 링크도 지원
   const legacy = window.location.hash.match(/^#\/sign\/([\w-]+)/);
