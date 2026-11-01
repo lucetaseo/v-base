@@ -50,7 +50,7 @@ import { today } from '../utils/date.js';
 import { formatPhone, won } from '../utils/format.js';
 import ContractViewModal from '../components/ContractViewModal.jsx';
 
-const CIRCLED = ['①', '②', '③'];
+const CIRCLED = ['①', '②', '③', '④', '⑤', '⑥'];
 
 const emptySchedule = () => ({ date: '', time: '', ampm: '', assignType: ASSIGN_TYPES.ENGINEER, engineerId: '', teamId: '', memo: '' });
 
@@ -139,6 +139,8 @@ export default function ContractEditor({ contractId, prefillFrom, prefillCategor
   const [customerResults, setCustomerResults] = useState(null);
   const [viewOpen, setViewOpen] = useState(false);
   const [paper, setPaper] = useState({ saved: null, add: [], remove: [] }); // 실물 계약서 사진 (저장 뒤 올림)
+  // [+ 시공 추가]: 같은 고객·현장에 다른 구분 시공을 함께 등록 (저장하면 구분마다 계약이 하나씩 따로 생김 → 계약 상세에서 한 묶음으로 보임)
+  const [extraWorks, setExtraWorks] = useState([]); // [{ category, lineItems }]
 
   useEffect(() => {
     if (!isEdit && prefillFrom) {
@@ -231,6 +233,37 @@ export default function ContractEditor({ contractId, prefillFrom, prefillCategor
     setLine(i, { places: cur.includes(place) ? cur.filter((x) => x !== place) : [...cur, place] });
   };
 
+  const setExtra = (k, patch) => setExtraWorks((prev) => prev.map((w, j) => (j === k ? { ...w, ...patch } : w)));
+  const setExtraLine = (k, i, patch) =>
+    setExtraWorks((prev) => prev.map((w, j) => (j === k ? { ...w, lineItems: w.lineItems.map((l, n) => (n === i ? { ...l, ...patch } : l)) } : w)));
+  const addExtraProduct = (k, id) => {
+    const p = productList.find((x) => x.id === Number(id));
+    if (!p) return;
+    setExtraWorks((prev) =>
+      prev.map((w, j) =>
+        j === k
+          ? {
+              ...w,
+              lineItems: [
+                ...w.lineItems,
+                {
+                  productId: p.id,
+                  name: p.name,
+                  detail: [p.detail, p.freeDetail && `[무료시공] ${p.freeDetail}`].filter(Boolean).join('\n'),
+                  qty: 1,
+                  unitPrice: p.price,
+                  ...(p.warranty ? { warranty: p.warranty } : {}),
+                },
+              ],
+            }
+          : w,
+      ),
+    );
+  };
+  const extraTotal = (w) => w.lineItems.reduce((t, l) => t + (Number(l.qty) || 0) * (Number(l.unitPrice) || 0), 0);
+  // 추가 시공은 아직 고르지 않은 구분부터 제안
+  const nextCategory = () => CATEGORIES.find((c) => c !== form.category && !extraWorks.some((w) => w.category === c)) || CATEGORIES[0];
+
   const searchCustomer = async () => {
     const q = form.customerName || form.customerPhone;
     if (!q.trim()) {
@@ -246,6 +279,11 @@ export default function ContractEditor({ contractId, prefillFrom, prefillCategor
 
   const handleSave = async (e) => {
     e.preventDefault();
+    const emptyExtra = extraWorks.findIndex((w) => !w.lineItems.some((l) => String(l.name || '').trim()));
+    if (emptyExtra >= 0) {
+      alert(`추가 시공 ${CIRCLED[emptyExtra + 1]} (${extraWorks[emptyExtra].category})에 상품을 넣거나 [삭제]를 눌러 주세요.`);
+      return;
+    }
     if (showAmount && amounts.balance < 0 && !window.confirm(`입금액이 실계약금보다 ${won(-amounts.balance)}원 많습니다. 그대로 저장하시겠습니까?`)) return;
     // 비어 있는 뒤쪽 회차는 저장하지 않음 (①은 항상 유지)
     const schedules = form.schedules.filter(
@@ -277,8 +315,32 @@ export default function ContractEditor({ contractId, prefillFrom, prefillCategor
       } catch (err) {
         photoError = `${photoError ? `${photoError}\n` : ''}실물 계약서 사진: ${err.message}`;
       }
-      if (photoError) alert(`계약은 저장되었지만 사진 일부를 올리지 못했습니다.\n${photoError}\n계약 수정에서 다시 첨부해 주세요.`);
-      else alert(isEdit ? '저장되었습니다.' : `계약이 등록되었습니다. (No.${saved.no})`);
+      // 추가 시공: 같은 고객·현장으로 구분마다 계약을 하나씩 (시공일은 ①과 같은 날, 담당은 구분이 달라 비워 둠)
+      const extraNos = [];
+      let extraError = '';
+      for (const w of extraWorks) {
+        try {
+          const s0 = schedules[0] || emptySchedule();
+          const extra = await contractApi.create({
+            ...initialForm(null, company, user),
+            ...groupPrefill(saved),
+            ownerId: form.ownerId,
+            approval: form.approval,
+            workType: form.workType,
+            engineerNote: form.engineerNote,
+            category: w.category,
+            lineItems: w.lineItems,
+            schedules: [{ ...emptySchedule(), date: s0.date, time: s0.time, ampm: s0.ampm }],
+          });
+          extraNos.push(`${w.category} No.${extra.no}`);
+        } catch (err) {
+          extraError = `${extraError}${extraError ? '\n' : ''}${w.category}: ${err.message}`;
+        }
+      }
+      const extraMsg = extraNos.length ? `\n추가 시공도 등록되었습니다: ${extraNos.join(', ')}` : '';
+      if (extraError) alert(`${isEdit ? '저장되었습니다.' : `계약이 등록되었습니다. (No.${saved.no})`}${extraMsg}\n\n추가 시공 일부를 등록하지 못했습니다.\n${extraError}`);
+      else if (photoError) alert(`계약은 저장되었지만 사진 일부를 올리지 못했습니다.\n${photoError}\n계약 수정에서 다시 첨부해 주세요.${extraMsg}`);
+      else alert(`${isEdit ? '저장되었습니다.' : `계약이 등록되었습니다. (No.${saved.no})`}${extraMsg}`);
       onClose(saved, isEdit);
     } catch (err) {
       handleError(err);
@@ -662,6 +724,96 @@ export default function ContractEditor({ contractId, prefillFrom, prefillCategor
             )}
           </tbody>
         </table>
+
+        {/* ---------------- 3-1. 추가 시공 (다른 구분) ---------------- */}
+        {extraWorks.map((w, k) => (
+          <div key={k} className="extra-work">
+            <h3 className="form-section-title extra-work-title">
+              &gt; 추가 시공 {CIRCLED[k + 1]}
+              <button type="button" className="btn-text-danger" onClick={() => setExtraWorks(extraWorks.filter((_, j) => j !== k))}>
+                삭제
+              </button>
+            </h3>
+            <table className="form-grid-table">
+              <tbody>
+                <tr>
+                  <td className="label-col">시공구분</td>
+                  <td className="input-col">
+                    {radios(`extra-category-${k}`, CATEGORIES, w.category, (v) => setExtra(k, { category: v, lineItems: v === w.category ? w.lineItems : [] }))}
+                  </td>
+                </tr>
+                <tr>
+                  <td className="label-col">상품선택</td>
+                  <td className="input-col">
+                    {(() => {
+                      const list = productList.filter((p) => p.category === w.category).sort((a, b) => (a.kind || '').localeCompare(b.kind || '') || a.id - b.id);
+                      return (
+                        <div className="inline-fields" style={{ marginBottom: 8 }}>
+                          <select className="input-text product-select" value="" onChange={(e) => addExtraProduct(k, e.target.value)}>
+                            <option value="">
+                              + {w.category} 상품 추가 ({list.length}개)
+                            </option>
+                            {list.map((p) => (
+                              <option key={p.id} value={p.id}>
+                                [{p.kind}] {p.name}
+                                {showAmount ? ` — ${won(p.price)}원` : ''}
+                              </option>
+                            ))}
+                          </select>
+                          {!list.length && <span className="sub-text">등록된 {w.category} 상품이 없습니다 (설정 → 상품관리)</span>}
+                          <button type="button" className="btn-dark-sm" onClick={() => setExtra(k, { lineItems: [...w.lineItems, { productId: null, name: '', detail: '', qty: 1, unitPrice: 0 }] })}>
+                            + 직접입력
+                          </button>
+                        </div>
+                      );
+                    })()}
+                    {w.lineItems.length > 0 && (
+                      <table className="line-items">
+                        <thead>
+                          <tr>
+                            <th>상품명</th>
+                            <th>상세품목</th>
+                            <th>수량</th>
+                            {showAmount && <th>단가</th>}
+                            {showAmount && <th>금액</th>}
+                            <th />
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {w.lineItems.map((l, i) => (
+                            <tr key={i}>
+                              <td className="li-name" data-label="상품명"><input className="input-text full" value={l.name} onChange={(e) => setExtraLine(k, i, { name: e.target.value })} /></td>
+                              <td className="li-detail" data-label="상세품목"><input className="input-text full" value={l.detail} onChange={(e) => setExtraLine(k, i, { detail: e.target.value })} /></td>
+                              <td className="li-qty" data-label="수량"><input type="number" min="1" className="input-text" style={{ width: 60 }} value={l.qty} onChange={(e) => setExtraLine(k, i, { qty: e.target.value })} /></td>
+                              {showAmount && (
+                                <td className="li-price" data-label="단가"><input type="number" min="0" className="input-text money" value={l.unitPrice} onChange={(e) => setExtraLine(k, i, { unitPrice: e.target.value })} /></td>
+                              )}
+                              {showAmount && <td className="text-right li-amount" data-label="금액">{won((Number(l.qty) || 0) * (Number(l.unitPrice) || 0))}</td>}
+                              <td className="li-del">
+                                <button type="button" className="btn-text-danger" onClick={() => setExtra(k, { lineItems: w.lineItems.filter((_, j) => j !== i) })}>삭제</button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    )}
+                    {showAmount && w.lineItems.length > 0 && <div className="extra-work-total">{w.category} 시공총액: <b>{won(extraTotal(w))}원</b></div>}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        ))}
+        {extraWorks.length < CATEGORIES.length - 1 && (
+          <div className="extra-work-add">
+            <button type="button" className="btn-add-work" onClick={() => setExtraWorks([...extraWorks, { category: nextCategory(), lineItems: [] }])}>
+              + 시공 추가
+            </button>
+            <span className="sub-text">
+              다른 구분(줄눈·청소·나노코팅 등)을 함께 계약할 때 누르세요. 저장하면 구분마다 계약이 따로 만들어지고, 같은 고객·현장으로 묶여 보입니다. (금액·입금·할인은 구분별 계약에서 따로 관리)
+            </span>
+          </div>
+        )}
 
         {/* ---------------- 4. 시공정보 (일정·담당) ---------------- */}
         <h3 className="form-section-title">&gt; 시공정보</h3>
