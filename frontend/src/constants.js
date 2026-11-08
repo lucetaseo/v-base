@@ -19,6 +19,7 @@ export const REVIEW_PAYBACK = 20000; // 시공 후기이벤트 참여 페이백
 export const COMPANY_DOC_FIELDS = ['bizType', 'bizItem', 'csPhone', 'mobile', 'quickPhone'];
 // 매입 구분: 시공 구분 + 여러 시공에 같이 쓰는 비용(공통)
 export const PURCHASE_CATEGORIES = ['공통', ...CATEGORIES];
+export const PRODUCT_KINDS = ['패키지', '추가시공품목', '무료시공']; // 상품 구분
 
 // 고객에게 계약서 한 장으로 묶어 보내는 구분 (같은 계약자·현장일 때). 그 외(나노코팅 등)는 따로
 export const SIGN_TOGETHER = ['줄눈', '청소'];
@@ -26,16 +27,16 @@ export const SIGN_TOGETHER = ['줄눈', '청소'];
 // 시공종류
 export const WORK_TYPES = ['시공', 'AS', '하자보수'];
 
-export const RECEPTION_TYPES = ['박람회', '음성계약', '사전계약', '옵션', '무상시공']; // 첫 번째가 계약 등록 기본값
+export const RECEPTION_TYPES = ['박람회', '음성계약', '사전계약', '옵션', '무상시공']; // 맨 앞이 새 계약의 기본값
 
 // 시공상태(최종) — 고객 모바일웹에 표시되는 값
 export const WORK_STATUS = ['미정', '해피콜완료', '배정', '시공완료', '시공연기', '취소'];
 
 // 기사가 모바일웹에서 보고하는 회차별 상태 ('' = 입력 전)
-export const MOBILE_STATUS = ['시공완료', '시공연기요청', '시공불가'];
+//   현장도착·시공시작은 진행 중 알림용 (완료 집계에는 들어가지 않음)
+export const MOBILE_STATUS = ['현장도착', '시공시작', '시공완료', '시공연기요청', '시공불가'];
 
 // 계약승인
-export const APPROVAL_STATUS = ['승인대기', '승인', '미승인'];
 
 // 시공 담당 지정 방식
 export const ASSIGN_TYPES = { ENGINEER: 'engineer', TEAM: 'team' };
@@ -55,6 +56,8 @@ export const DEFAULT_SCHEDULE_SETTINGS = {
   endTime: '20:00',
   interval: 30,
   maxPerDay: 0, // 기사 1인 하루 최대 배정 건수 (0 = 제한 없음)
+  // 시공 자재 목록 — 기사가 시공완료 보고 때 골라 쓰고 번호(색상)만 적음 (예: 크린파파 위너스 101번)
+  materials: ['크린파파 위너스', '빅라이언', '케라폭시', '폴리'],
 };
 
 // 입금 구분

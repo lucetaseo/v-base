@@ -8,6 +8,7 @@ import ContractEditor from './ContractEditor.jsx';
 import ContractDetail from './ContractDetail.jsx';
 import ContractViewModal from '../components/ContractViewModal.jsx';
 import KakaoModal from '../components/KakaoModal.jsx';
+import AsModal from '../components/AsModal.jsx';
 import Pagination from '../components/Pagination.jsx';
 import { calcAmounts, itemsSummary, summarize, timeLabel } from '../utils/contract.js';
 import { formatAddress, won } from '../utils/format.js';
@@ -70,6 +71,8 @@ export default function ContractPage({ route }) {
       <ContractDetail
         key={detail.id}
         contractId={Number(detail.id)}
+        initialTab={query.get('tab') || undefined}
+        focus={query.get('focus') || undefined}
         onBack={() => goBack('/contracts')}
         onEdit={(c) => navigateForward(`/contracts/${c.id}/edit`)}
         onNewWork={(c, category) => navigateForward(`/contracts/new?from=${c.id}${category ? `&category=${encodeURIComponent(category)}` : ''}`)}
@@ -77,9 +80,9 @@ export default function ContractPage({ route }) {
       />
     );
   }
-  const trash = path === '/contracts/trash';
-  if (trash && !can('contract.delete')) return <NoPermission />;
-  return <ContractList key={trash ? 'trash' : 'main'} trash={trash} engineers={engineers} />;
+  const mode = path === '/contracts/trash' ? 'trash' : path === '/contracts/as' ? 'as' : 'main';
+  if (mode === 'trash' && !can('contract.delete')) return <NoPermission />;
+  return <ContractList key={mode} mode={mode} engineers={engineers} />;
 }
 
 function NoPermission() {
@@ -93,33 +96,51 @@ function NoPermission() {
 // 최근에 받은 계약 목록 (화면을 옮겼다 돌아와도 바로 보여주고, 서버에는 '바뀐 게 있는지'만 물어봄)
 //   계정·휴지통·검색조건별로 따로 기억. 새로고침하면 비워짐
 const listCache = new Map();
+// mode: 'main' 계약관리 / 'as' AS관리 / 'trash' 휴지통
+const listKey = (userId, filter, mode) => `${userId}|${mode}|${JSON.stringify(filter)}`;
 
-function ContractList({ trash, engineers }) {
+// 다른 화면(상담홈)에서도 같은 기억을 씀 — 받아 둔 목록을 먼저 쓰고, 서버에는 바뀐 게 있는지만 물어봄
+export const cachedContractRows = (userId, filter = EMPTY_FILTER) => listCache.get(listKey(userId, filter, 'main'))?.rows || null;
+export async function fetchContractRows(userId, filter = EMPTY_FILTER) {
+  const key = listKey(userId, filter, 'main');
+  const cached = listCache.get(key);
+  const r = await contractApi.listCached({ ...filter, trash: false }, cached?.version || '');
+  if (r.unchanged && cached) return cached.rows;
+  listCache.set(key, { version: r.version, rows: r.rows });
+  if (listCache.size > 20) listCache.delete(listCache.keys().next().value);
+  return r.rows;
+}
+
+function ContractList({ mode = 'main', engineers }) {
+  const trash = mode === 'trash';
+  const asMode = mode === 'as';
   const { user, can, handleError } = useAuth();
   const showAmount = can('contract.amount');
   const showTotals = showAmount && can('sales.total'); // 회사 전체 매출 합계는 관리자가 허락한 계정만
 
   const [filter, setFilter] = useState(loadSavedFilter);
-  const cacheKey = `${user.id}|${trash ? 1 : 0}|${JSON.stringify(filter)}`;
+  const cacheKey = listKey(user.id, filter, mode);
   const [rows, setRows] = useState(() => listCache.get(cacheKey)?.rows || []);
   const [loading, setLoading] = useState(() => !listCache.has(cacheKey));
   // 쪽 번호는 기억해 두어, 상세에서 뒤로 왔을 때 같은 쪽을 보여줌
-  const [page, setPageState] = useState(() => Number(sessionStorage.getItem(`${PAGE_KEY}.${trash}`)) || 1);
+  const [page, setPageState] = useState(() => Number(sessionStorage.getItem(`${PAGE_KEY}.${mode}`)) || 1);
   const setPage = (n) => {
     setPageState(n);
-    sessionStorage.setItem(`${PAGE_KEY}.${trash}`, String(n));
+    sessionStorage.setItem(`${PAGE_KEY}.${mode}`, String(n));
   };
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [staff, setStaff] = useState([]);
   const [viewId, setViewId] = useState(null);
   const [kakaoTarget, setKakaoTarget] = useState(null);
+  const [asOpen, setAsOpen] = useState(false); // AS 접수 창 (선택 AS관리로)
+  const [asFilter, setAsFilter] = useState('all'); // AS관리: 전체 / 처리중 / 완료
 
   const load = useCallback(async () => {
     const cached = listCache.get(cacheKey);
     if (cached) setRows(cached.rows); // 기억해 둔 목록을 먼저 보여주고
     else setLoading(true);
     try {
-      const r = await contractApi.listCached({ ...filter, trash }, cached?.version || '');
+      const r = await contractApi.listCached({ ...filter, trash, as: asMode }, cached?.version || '');
       if (r.unchanged && cached) return; // 바뀐 게 없으면 그대로 (받는 데이터 거의 없음)
       listCache.set(cacheKey, { version: r.version, rows: r.rows });
       if (listCache.size > 20) listCache.delete(listCache.keys().next().value); // 오래된 검색조건부터 비움
@@ -129,7 +150,7 @@ function ContractList({ trash, engineers }) {
     } finally {
       setLoading(false);
     }
-  }, [filter, trash, handleError, cacheKey]);
+  }, [filter, trash, asMode, handleError, cacheKey]);
 
   useEffect(() => {
     load();
@@ -156,10 +177,16 @@ function ContractList({ trash, engineers }) {
     sessionStorage.setItem(FILTER_KEY, JSON.stringify(next));
   };
 
-  const summary = useMemo(() => summarize(rows), [rows]);
-  const maxPage = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
+  // AS관리: 처리중(완료 안 된 회차가 있음) / 완료
+  const asOpenOf = (c) => (c.asLogs ? c.asLogs.some((l) => !l.doneAt) : !!c.asInfo);
+  const shown = useMemo(
+    () => (asMode && asFilter !== 'all' ? rows.filter((c) => asOpenOf(c) === (asFilter === 'open')) : rows),
+    [rows, asMode, asFilter],
+  );
+  const summary = useMemo(() => summarize(shown), [shown]);
+  const maxPage = Math.max(1, Math.ceil(shown.length / PAGE_SIZE));
   const currentPage = Math.min(page, maxPage); // 기억한 쪽이 범위를 넘으면 마지막 쪽
-  const pageRows = rows.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+  const pageRows = shown.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
 
   const toggle = (id) =>
     setSelectedIds((prev) => {
@@ -192,7 +219,7 @@ function ContractList({ trash, engineers }) {
 
   const handleExport = () => {
     downloadExcel(
-      rows.map((c) => {
+      shown.map((c) => {
         const a = calcAmounts(c);
         const row = {
           번호: c.no,
@@ -203,7 +230,6 @@ function ContractList({ trash, engineers }) {
           전자계약: c.esign?.status,
           계약일: c.contractDate,
           시공종류: c.workType,
-          계약승인: c.approval,
           '시공 등록': c.schedules.map((s) => s.date && `${s.date} ${timeLabel(s)}`.trim()).filter(Boolean).join(', ') || '미정',
           시공담당: c.schedules.map((s) => s.assigneeName).filter(Boolean).join(', ') || '미배정',
           모바일웹: c.schedules.map((s) => s.mobileStatus || '입력 전').join(', '),
@@ -219,7 +245,7 @@ function ContractList({ trash, engineers }) {
           취소사유: c.cancelReason,
           작성자: c.ownerName,
         };
-        if (showTotals) {
+        if (showTotals && !c.amountHidden) {
           Object.assign(row, {
             시공총액: a.total,
             할인: a.discount,
@@ -234,7 +260,7 @@ function ContractList({ trash, engineers }) {
         return row;
       }),
       '계약목록',
-      trash ? '계약관리_휴지통' : '계약관리_목록',
+      trash ? '계약관리_휴지통' : asMode ? 'AS관리_목록' : '계약관리_목록',
     );
   };
 
@@ -246,12 +272,12 @@ function ContractList({ trash, engineers }) {
         <button type="button" className="btn-dark-action" onClick={() => setViewId(item.id)}>
           계약서
         </button>
-        {can('contract.edit') && (
+        {can('contract.edit') && !item.readOnly && (
           <button type="button" className="btn-outline-action" onClick={() => navigateForward(`/contracts/${item.id}/edit`)}>
             수정
           </button>
         )}
-        {can('notify.send') && (
+        {(
           <button type="button" className="btn-kakao-talk sm" onClick={() => setKakaoTarget(item)}>
             알림톡
           </button>
@@ -262,7 +288,20 @@ function ContractList({ trash, engineers }) {
   return (
     <div className="page-card">
       <div className="page-title-row">
-        <h2>{trash ? '🗑️ 휴지통' : '계약관리'}</h2>
+        <h2>{trash ? '🗑️ 휴지통' : asMode ? '🔧 AS관리' : '계약관리'}</h2>
+        {asMode && (
+          <div className="as-filter">
+            {[
+              ['all', '전체'],
+              ['open', '처리중'],
+              ['done', '완료'],
+            ].map(([k, label]) => (
+              <button key={k} type="button" className={asFilter === k ? 'on' : ''} onClick={() => (setAsFilter(k), setPage(1))}>
+                {label} {k === 'all' ? rows.length : rows.filter((c) => asOpenOf(c) === (k === 'open')).length}
+              </button>
+            ))}
+          </div>
+        )}
         {user.role === ROLES.MANAGER && isOwnScopeOnly(user) && <span className="scope-badge">본인 작성 계약만 표시</span>}
       </div>
 
@@ -321,18 +360,17 @@ function ContractList({ trash, engineers }) {
         )}
       </div>
 
-      {(can('contract.delete') || can('contract.approve')) && (
+      {(can('contract.delete') || can('contract.edit')) && (
         <div className="bulk-bar">
           <span className="sub-text">선택 {selectedIds.size}건</span>
-          {!trash && can('contract.approve') && (
-            <>
-              <button type="button" className="btn-outline-action" onClick={() => bulk('setApproval', '승인 처리하시겠습니까?', '승인')}>
-                선택 승인
-              </button>
-              <button type="button" className="btn-outline-action" onClick={() => bulk('setApproval', '미승인 처리하시겠습니까?', '미승인')}>
-                선택 미승인
-              </button>
-            </>
+          {!trash && can('contract.edit') && (
+            <button
+              type="button"
+              className="btn-outline-action"
+              onClick={() => (asMode ? bulk('setAs', 'AS 완료 처리하시겠습니까?', false) : selectedIds.size ? setAsOpen(true) : alert('선택된 계약이 없습니다.'))}
+            >
+              {asMode ? '선택 AS 완료' : '선택 AS관리로'}
+            </button>
           )}
           {!can('contract.delete') ? null : trash ? (
             <>
@@ -364,12 +402,24 @@ function ContractList({ trash, engineers }) {
             renderActions={renderActions}
             onOpen={trash ? undefined : (c) => navigateForward(`/contracts/${c.id}`)}
           />
-          <Pagination page={currentPage} total={rows.length} pageSize={PAGE_SIZE} onChange={setPage} />
+          <Pagination page={currentPage} total={shown.length} pageSize={PAGE_SIZE} onChange={setPage} />
         </>
       )}
 
       {viewId && <ContractViewModal contractId={viewId} onClose={() => setViewId(null)} onChanged={load} />}
       {kakaoTarget && <KakaoModal contract={kakaoTarget} onClose={() => setKakaoTarget(null)} />}
+      {asOpen && (
+        <AsModal
+          title={`선택한 ${selectedIds.size}건`}
+          onClose={() => setAsOpen(false)}
+          onSave={async (info) => {
+            await contractApi.setAs([...selectedIds], true, info);
+            setAsOpen(false);
+            setSelectedIds(new Set());
+            await load();
+          }}
+        />
+      )}
     </div>
   );
 }

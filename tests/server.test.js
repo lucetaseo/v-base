@@ -90,16 +90,33 @@ test('비로그인·허용 외 호출 차단', async () => {
   assert.equal((await admin('nope', 'list')).status, 400);
 });
 
-test('실장 권한: 본인 작성 건만, 금액 숨김, 삭제 불가, 승인대기로 등록', async () => {
+test('실장 권한(본인 계약만): 전체 계약을 보되 다른 사람 계약은 금액 가림·보기만, 통계는 본인 것만, 삭제 불가, 등록하면 바로 승인', async () => {
+  assert.equal((await manager.ok('auth', 'me')).user.dataScope, 'own', '샘플 실장은 본인 계약만 설정');
   const all = await admin.ok('contracts', 'list', {});
-  const mine = await manager.ok('contracts', 'list', {});
-  assert.ok(mine.length > 0 && mine.length < all.length);
-  assert.ok(mine.every((c) => c.totalAmount === null));
-  const other = all.find((c) => !mine.some((m) => m.id === c.id));
-  assert.equal((await manager('contracts', 'get', other.id)).status, 404);
+  const seen = await manager.ok('contracts', 'list', {});
+  assert.equal(seen.length, all.length, '실장도 전체 계약이 보임');
+  const me = (await manager.ok('auth', 'me')).user;
+  const mine = seen.filter((c) => !c.readOnly);
+  const others = seen.filter((c) => c.readOnly);
+  assert.ok(mine.length > 0 && others.length > 0);
+  assert.ok(mine.every((c) => typeof c.totalAmount === 'number' && !c.amountHidden), '본인 계약은 금액 보임');
+  assert.ok(others.every((c) => c.amountHidden && c.totalAmount === null && c.payments.length === 0), '다른 사람 계약은 금액·입금 가림');
+  assert.ok((await manager.ok('auth', 'me')).user.permissions.every((p) => p !== 'sales.total'), '회사 매출 합계는 체크한 실장만');
+  // 다른 사람 계약: 상세·계약서는 보이고(금액 없이), 수정·입금·영수증은 막힘
+  const other = others[0];
+  const got = await manager.ok('contracts', 'get', other.id);
+  assert.ok(got.readOnly && got.amountHidden && got.totalAmount === null);
+  const group = await manager.ok('contracts', 'group', other.id);
+  assert.ok(group.contracts.every((c) => c.amountHidden || c.ownerId === me.id));
+  assert.ok((await manager.ok('contracts', 'signBundle', other.id)).contracts.every((c) => c.amountHidden || c.ownerId === me.id), '계약서도 금액 가림');
+  const upd = await manager('contracts', 'update', other.id, { memo: '남의 계약 수정' });
+  assert.equal(upd.status, 403, '다른 사람 계약 수정 불가');
+  assert.match(upd.error.message, /보기만/);
+  assert.equal((await manager('contracts', 'addPayment', other.id, { date: '2026-10-01', kind: '잔금', method: '현금', amount: 1000 })).status, 403);
   assert.equal((await manager('contracts', 'moveToTrash', [mine[0].id])).status, 403);
   const created = await manager.ok('contracts', 'create', { ...base, customerName: '실장고객' });
-  assert.equal(created.approval, '승인대기');
+  assert.equal(created.approval, '승인', '계약승인은 고르지 않고 모두 승인');
+  assert.ok(!created.readOnly, '본인이 등록한 계약은 수정 가능');
 });
 
 test('동시 계약 등록 10건: 번호 중복 없음', async () => {
@@ -193,11 +210,10 @@ test('전자서명: 링크 조회(내부정보 제외) → 서명 → 이미지�
   assert.ok(list.every((c) => !c.esign?.signature), '목록에는 서명 이미지 없음');
 });
 
-test('로그인 5회 실패 시 잠금, 로그아웃 후 차단', async () => {
+test('로그인 여러 번 실패해도 잠기지 않음, 로그아웃 후 차단', async () => {
   const bad = client();
-  for (let i = 0; i < 5; i++) assert.equal((await bad('auth', 'login', 'manager', 'wrong')).status, 400);
-  const r = await bad('auth', 'login', 'manager', 'manager1234');
-  assert.match(r.error.message, /잠겼습니다/);
+  for (let i = 0; i < 6; i++) assert.equal((await bad('auth', 'login', 'manager', 'wrong')).status, 400);
+  assert.equal((await bad.ok('auth', 'login', 'manager', 'manager1234')).user.loginId, 'manager', '틀린 뒤에도 바로 로그인');
 
   await admin.ok('auth', 'logout');
   assert.equal((await admin('contracts', 'list', {})).status, 401);
@@ -247,7 +263,7 @@ test('계약 상세: 같은 계약자·현장 시공 묶음, 입금/환불/수�
   assert.equal(calcAmounts(c).refund, 0);
   assert.ok(c.history.some((h) => h.action === '입금 수정'));
 
-  assert.equal((await manager('contracts', 'addPayment', a.id, { amount: 1000 })).status, 403, '수정 권한 없는 실장은 입금 등록 불가');
+  assert.ok([403, 404].includes((await manager('contracts', 'addPayment', a.id, { amount: 1000 })).status), '본인 계약이 아닌 실장은 입금 등록 불가');
 
   await admin.ok('contracts', 'addNote', b.id, '고객 통화: 오전 선호');
   const g2 = await admin.ok('contracts', 'group', a.id);
@@ -308,8 +324,48 @@ test('로그인 주소로 구분: 기사 아이디와 직원 아이디가 같아
   // 직원 계정이 없는 기사 아이디는 일반 화면에서도 기사로 (예전처럼)
   await admin.ok('engineers', 'save', { name: '기사만', phone: '010-0956-0956', loginId: 'onlyeng', password: 'only0956' });
   assert.equal((await client().ok('auth', 'login', 'onlyeng', 'only0956', '', 'staff')).user.role, 'ENGINEER');
+  // /t(상담실장)는 직원 계정만 — 기사 아이디로는 안 됨
+  assert.equal((await client().ok('auth', 'login', 'twin0955', 'staff0955', '', 'manager')).user.role, 'MANAGER', '/t → 직원');
+  assert.equal((await client()('auth', 'login', 'onlyeng', 'only0956', '', 'manager')).status, 400, '/t 에서는 기사 로그인 불가');
   // /m 에서는 직원 계정으로 로그인 불가
   assert.equal((await client()('auth', 'login', 'admin', 'admin1234', '', 'engineer')).status, 400);
+});
+
+test('한 브라우저에서 따로 로그인: 일반 화면 · 상담실장(/t) · 기사모바일(/m) 탭이 서로의 로그인을 바꾸지 않음', async () => {
+  await admin.ok('engineers', 'save', { name: '탭기사', phone: '010-0957-0957', loginId: 'tabeng', password: 'tab0957' });
+  let cookie = '';
+  const tab = (app) => async (service, method, ...args) => {
+    const out = await handleRpc({ body: { service, method, args }, headers: { cookie, host: 'test.local', ...(app ? { 'x-vb-app': app } : {}) } });
+    const set = out.headers['Set-Cookie'];
+    if (set) cookie = set.split(';')[0].replace(/^uffice_session=$/, '');
+    return { status: out.status, ...JSON.parse(out.body) };
+  };
+  const general = tab('');
+  const consult = tab('manager');
+  const mobile = tab('engineer');
+  assert.equal((await general('auth', 'login', 'admin', 'admin1234', '', 'staff')).result.user.role, 'ADMIN');
+  assert.equal((await mobile('auth', 'me')).status, 401, '기사 탭은 따로 로그인해야 함');
+  assert.equal((await consult('auth', 'me')).status, 401, '상담실장 탭도 따로');
+  assert.equal((await mobile('auth', 'login', 'tabeng', 'tab0957', '', 'engineer')).result.user.role, 'ENGINEER');
+  assert.equal((await consult('auth', 'login', 'manager', 'manager1234', '', 'manager')).result.user.role, 'MANAGER');
+  assert.equal((await general('auth', 'me')).result.user.role, 'ADMIN', '일반 탭은 그대로 관리자');
+  assert.equal((await mobile('auth', 'me')).result.user.role, 'ENGINEER');
+  assert.equal((await consult('auth', 'me')).result.user.role, 'MANAGER');
+  // 기사 탭 로그아웃 → 다른 탭은 그대로
+  await mobile('auth', 'logout');
+  assert.equal((await mobile('auth', 'me')).status, 401);
+  assert.equal((await general('auth', 'me')).result.user.role, 'ADMIN');
+  assert.equal((await consult('auth', 'me')).result.user.role, 'MANAGER');
+  // 일반 탭 로그아웃 → 상담실장 탭은 그대로
+  await general('auth', 'logout');
+  assert.equal((await general('auth', 'me')).status, 401);
+  assert.equal((await consult('auth', 'me')).result.user.role, 'MANAGER');
+  // 예전 쿠키(칸 나누기 전 기사 로그인): 기사 탭에서도 그대로 로그인 상태 (다시 로그인 안 해도 됨)
+  cookie = '';
+  await general('auth', 'login', 'tabeng', 'tab0957', '', 'engineer'); // 머리글 없이 = 예전 방식으로 맨 위에 기사 로그인
+  assert.equal((await mobile('auth', 'me')).result.user.role, 'ENGINEER', '예전 기사 로그인은 기사 탭에서 유지');
+  await general('auth', 'login', 'admin', 'admin1234', '', 'staff');
+  assert.equal((await mobile('auth', 'me')).result.user.role, 'ENGINEER', '일반 탭에서 로그인해도 기사 로그인은 그대로');
 });
 
 test('수정로그: 누가 무엇을 바꿨는지 기록, 관리자만 조회, 로그인은 기록 안 함, 2주 지난 기록은 지움', async () => {
@@ -396,9 +452,10 @@ test('서버 연결 점검(/api/rpc GET): 비밀값은 숨기고 설정·DB 상�
 
 test('업체 주소 코드: 로그인 화면 조회, 그 업체 계정만 로그인, 코드 중복·형식 검사', async () => {
   const anon = client();
-  const info = await anon.ok('companies', 'publicInfo', 'thegood');
-  assert.deepEqual({ code: info.code, name: info.name }, { code: 'thegood', name: '더좋은집' });
-  assert.match(info.periodEnd, /^\d{4}-\d{2}-\d{2}$/); // 로그인 화면의 사용 가능 기한
+  const pub = await anon.ok('companies', 'publicInfo', 'thegood');
+  assert.equal(pub.name, '더좋은집');
+  assert.match(pub.periodEnd, /^\d{4}-\d{2}-\d{2}$/, '로그인 화면에 이용기간(끝나는 날) 표시');
+  assert.deepEqual(Object.keys(pub).sort(), ['code', 'name', 'periodEnd', 'periodStart'], '로그인 전에는 이름·이용기간만');
   assert.equal(await anon.ok('companies', 'publicInfo', 'nope'), null);
 
   const sup = client();
@@ -704,7 +761,7 @@ test('계약 수정 화면 입금 줄 사진: paymentPhotos 로 추가·삭제, 
   assert.equal((await manager('contracts', 'paymentPhotos', c.id, pid, { add: [img(3)] })).status >= 400, true, '권한 없는 실장 차단');
 });
 
-test('고객 참고사항: 저장·이력, 서명 링크(고객)에는 보이고 내부 메모는 숨김, 서명 후 바뀌면 재서명', async () => {
+test('고객 참고사항: 저장·이력, 서명 링크(고객)에는 보이고 내부 메모는 숨김, 서명 후 고쳐도 다시 서명 안 받음', async () => {
   const c = await admin.ok('contracts', 'create', { ...base, customerName: '참고고객', customerPhone: '010-7777-4545', memo: '내부 메모', customerNote: '시공 후 24시간 물 사용 금지' });
   assert.equal(c.customerNote, '시공 후 24시간 물 사용 금지');
   const { url } = await admin.ok('contracts', 'requestSign', c.id);
@@ -715,11 +772,54 @@ test('고객 참고사항: 저장·이력, 서명 링크(고객)에는 보이고
   assert.equal(view.contract.memo, undefined, '내부 메모는 숨김');
   await anon.ok('esign', 'sign', token, { signerName: '참고고객', signature: 'data:image/png;base64,AAAA', agreed: true });
   const full = await admin.ok('contracts', 'get', c.id);
-  const u = await admin.ok('contracts', 'update', c.id, { ...full, customerNote: '바뀐 안내' });
-  assert.notEqual(u.esign.status, '서명완료', '고객 참고사항이 바뀌면 다시 서명 필요');
+  const u = await admin.ok('contracts', 'update', c.id, { ...full, customerNote: '바뀐 안내', totalAmount: (full.totalAmount || 0) + 10000 });
+  assert.equal(u.esign.status, '서명완료', '서명 뒤 고쳐도 서명완료 그대로');
+  assert.equal((await anon.ok('esign', 'getByToken', token)).contract.customerNote, '바뀐 안내', '보낸 서명 링크도 그대로 열림 (고친 내용으로)');
   assert.ok(u.history.at(-1).changes.some((ch) => ch.label === '고객 참고사항'));
   const row = (await admin.ok('contracts', 'list', {})).find((x) => x.id === c.id);
   assert.equal(row.customerNote, undefined, '목록에는 안 보냄');
+});
+
+test('서명 링크가 계속 열림: 다시 요청 전 예전 링크, 고객확인페이지 값으로 /e 열기, 서명 링크 값으로 고객확인페이지 열기, 예전에 풀린 서명 되돌리기', async () => {
+  const c = await admin.ok('contracts', 'create', { ...base, customerName: '링크고객', customerPhone: '010-7878-1212', category: '나노코팅' });
+  const first = (await admin.ok('contracts', 'requestSign', c.id)).url.split('/sign/')[1];
+  const second = (await admin.ok('contracts', 'requestSign', c.id)).url.split('/sign/')[1];
+  assert.notEqual(first, second);
+  const anon = client();
+  assert.equal((await anon.ok('esign', 'getByToken', first)).contract.id, c.id, '다시 요청하기 전에 보낸 링크도 열림');
+  const { token: custToken } = await admin.ok('contracts', 'customerLink', c.id);
+  assert.equal((await anon.ok('esign', 'getByToken', custToken)).contract.id, c.id, '계약완료 알림톡 값(고객확인페이지)으로 /e 열어도 계약서');
+  await anon.ok('esign', 'sign', first, { signerName: '링크고객', signature: 'data:image/png;base64,QkJC', agreed: true });
+  assert.equal((await admin.ok('contracts', 'get', c.id)).esign.status, '서명완료', '예전 링크로 서명해도 됨');
+  const phone = client();
+  assert.ok((await phone.ok('customerApp', 'linkLogin', second)).contracts.some((x) => x.id === c.id), '서명 링크 값으로 고객확인페이지 열기');
+  assert.equal((await client()('esign', 'getByToken', 'no-such-token')).status, 404);
+  // 알림톡: 화면이 링크 값(#{ecode})을 비운 채 보내도 서버가 채움 → /e/?q= 빈 링크로 나가지 않음
+  await admin.ok('notifications', 'send', { contractId: c.id, template: '계약완료', templateKey: '계약완료', variables: { 고객명: '링크고객', ecode: '' }, buttons: [{ name: '내 계약 확인', url: 'https://veritybase.vercel.app/thegood/c/?q=' }], target: '고객', brand: '더좋은집', receiverName: '링크고객', receiverPhone: '010-7878-1212', message: 'x' });
+  await admin.ok('notifications', 'send', { contractId: c.id, template: '서명요청', templateKey: '서명요청', variables: { 고객명: '링크고객', ecode: 'wrong-value' }, buttons: [], target: '고객', brand: '더좋은집', receiverName: '링크고객', receiverPhone: '010-7878-1212', message: 'x' });
+  const logs = await admin.ok('notifications', 'history', c.id);
+  const [doneLog, signLog] = logs.slice(-2);
+  assert.equal(doneLog.variables.ecode, custToken, '계약완료: 비어 있으면 고객확인페이지 값');
+  assert.ok(doneLog.buttons[0].url.endsWith(`?q=${custToken}`), '기록된 버튼 주소에도 값');
+  assert.equal(signLog.variables.ecode, second, '서명요청: 이 계약 것이 아닌 값이면 지금 서명 링크 값');
+  for (const v of [doneLog.variables.ecode, signLog.variables.ecode]) assert.equal((await client().ok('esign', 'getByToken', v)).contract.id, c.id, '보낸 값으로 /e 열림');
+
+  // 예전 규칙으로 서명이 풀린 계약 → 서명완료로 되돌림 (한 번만)
+  const d = await admin.ok('contracts', 'create', { ...base, customerName: '풀린고객', customerPhone: '010-7878-3434', category: '나노코팅' });
+  const tk = (await admin.ok('contracts', 'requestSign', d.id)).url.split('/sign/')[1];
+  await anon.ok('esign', 'sign', tk, { signerName: '풀린고객', signature: 'data:image/png;base64,Q0ND', agreed: true });
+  const pgc = new pg.Client({ connectionString: url });
+  await pgc.connect();
+  await pgc.query(`UPDATE contracts SET data = jsonb_set(data, '{esign}', (data->'esign') || '{"status":"미발송","token":null}'::jsonb || jsonb_build_object('previousSignedAt', data->'esign'->'signedAt')) WHERE id = $1`, [d.id]);
+  await pgc.query(`UPDATE companies SET data = data - 'signRestored'`);
+  await pgc.end();
+  assert.equal((await admin.ok('contracts', 'get', d.id)).esign.status, '미발송');
+  const r = await admin.ok('contracts', 'repairCustomerLinks');
+  assert.ok(r.restored >= 1);
+  const back = await admin.ok('contracts', 'get', d.id);
+  assert.equal(back.esign.status, '서명완료', '서명완료로 되돌림');
+  assert.ok(back.esign.token && back.esign.signature, '링크 값·서명 이미지 있음');
+  assert.equal((await admin.ok('contracts', 'repairCustomerLinks')).restored, 0, '두 번째는 할 일 없음');
 });
 
 test('목록 변경 확인(listCached): 그대로면 목록 없이 응답, 수정·입금·휴지통·권한이 바뀌면 새 목록', async () => {
@@ -753,34 +853,33 @@ test('목록 변경 확인(listCached): 그대로면 목록 없이 응답, 수�
   const afterPay = await admin.ok('contracts', 'listCached', {}, base1.version);
   assert.ok(afterPay.rows, '입금 후 새 목록');
   assert.equal((await admin.ok('contracts', 'listCached', {}, afterPay.version)).unchanged, true);
-  // 다른 사람이 등록한 계약은 본인 건만 보는 실장의 목록을 바꾸지 않음
+  // 실장도 전체 계약을 보므로 다른 사람이 등록한 계약도 목록에 새로 나타남
   const mineNow = await manager.ok('contracts', 'listCached', {}, '');
   await admin.ok('contracts', 'create', { ...base, customerName: '남의계약', customerPhone: '010-8282-9393' });
   const mineAfter = await manager.ok('contracts', 'listCached', {}, mineNow.version);
-  const isOwn = (await manager.ok('auth', 'me')).user.dataScope === 'own';
-  if (isOwn) assert.equal(mineAfter.unchanged, true, '본인 건만 보는 실장은 그대로');
-  else assert.ok(mineAfter.rows);
+  assert.ok(mineAfter.rows && mineAfter.rows.some((r) => r.customerName === '남의계약' && r.readOnly), '다른 사람 계약도 (보기만) 나타남');
 });
 
 test('줄눈·청소 한 장 계약서: 같은 고객(이름+전화)·같은 브랜드끼리 한 링크로 서명, 코팅·다른 브랜드·이미 서명한 건은 따로', async () => {
   const site = { ...base, customerName: '한장고객', customerPhone: '010-6060-1212', aptName: '한장아파트', dong: '102', ho: '303' };
   const a = await admin.ok('contracts', 'create', { ...site, category: '줄눈', totalAmount: 500000, customerNote: '줄눈 안내' });
   const b = await admin.ok('contracts', 'create', { ...site, category: '청소', totalAmount: 300000, customerNote: '청소 안내' });
-  const otherSite = await admin.ok('contracts', 'create', { ...site, ho: '404', category: '청소' }); // 같은 고객의 다른 호수 → 같이
+  const otherSite = await admin.ok('contracts', 'create', { ...site, ho: '404', category: '청소' }); // 같은 고객이어도 다른 호수 → 따로
   const other = await admin.ok('contracts', 'create', { ...site, customerPhone: '010-6060-9999', category: '청소' }); // 전화번호 다르면 따로
   const coat = await admin.ok('contracts', 'create', { ...site, category: '나노코팅' }); // 코팅은 같은 현장이어도 따로
   const otherBrand = await admin.ok('contracts', 'create', { ...site, brand: '더스타트', category: '청소' }); // 브랜드가 다르면 따로
 
   const before = await admin.ok('contracts', 'signBundle', b.id);
-  assert.deepEqual(before.contracts.map((c) => c.id), [a.id, b.id, otherSite.id], '서명 전: 같은 고객(이름+전화)의 줄눈·청소 함께');
+  assert.deepEqual(before.contracts.map((c) => c.id), [a.id, b.id], '서명 전: 같은 고객(이름+전화)·같은 현장의 줄눈·청소 함께');
+  assert.deepEqual((await admin.ok('contracts', 'signBundle', otherSite.id)).contracts.map((c) => c.id), [otherSite.id], '다른 현장은 계약서 따로');
   assert.equal(before.token, null, '아직 링크 없음');
 
   const { token, count } = await admin.ok('contracts', 'requestSign', a.id);
-  assert.equal(count, 3);
+  assert.equal(count, 2);
   const anon = client();
   const view = await anon.ok('esign', 'getByToken', token);
-  assert.deepEqual(view.contracts.map((c) => c.category), ['줄눈', '청소', '청소']);
-  assert.deepEqual(view.contracts.map((c) => c.customerNote || ''), ['줄눈 안내', '청소 안내', '']);
+  assert.deepEqual(view.contracts.map((c) => c.category), ['줄눈', '청소']);
+  assert.deepEqual(view.contracts.map((c) => c.customerNote || ''), ['줄눈 안내', '청소 안내']);
   assert.ok(view.contracts.every((c) => c.memo === undefined && c.history === undefined));
   assert.equal((await admin.ok('contracts', 'signBundle', b.id)).token, token, '청소 쪽에서 봐도 같은 링크');
 
@@ -805,8 +904,14 @@ test('줄눈·청소 한 장 계약서: 같은 고객(이름+전화)·같은 브
   const later = await admin.ok('contracts', 'signBundle', c3.id);
   assert.deepEqual(later.contracts.map((c) => c.id), [c3.id], '이미 서명한 줄눈·청소는 다시 서명하지 않음');
   const signedView = await admin.ok('contracts', 'signBundle', a.id);
-  assert.deepEqual(signedView.contracts.map((c) => c.id), [a.id, b.id, otherSite.id], '서명한 계약서는 함께 서명한 묶음으로 보임');
+  assert.deepEqual(signedView.contracts.map((c) => c.id), [a.id, b.id], '서명한 계약서는 함께 서명한 묶음으로 보임');
+  assert.equal((await admin.ok('contracts', 'get', otherSite.id)).esign.status, '미발송', '다른 현장은 서명 안 됨 (따로 받음)');
   assert.ok(signedView.contracts.every((c) => c.esign.signature === img));
+  // 계약 번호가 잘못 오면 서버 오류(500)가 아니라 '찾을 수 없음' 안내
+  for (const bad of ['abc', null, '']) {
+    const r = await admin('contracts', 'signBundle', bad);
+    assert.equal(r.status, 404, `번호 ${JSON.stringify(bad)}`);
+  }
 });
 
 test('계약 조건: 서명할 때 조건을 계약에 함께 보관 (나중에 조건을 바꿔도 서명한 계약서는 그대로)', async () => {
@@ -859,6 +964,7 @@ test('직원 계정 일괄 등록: 실장은 기본 권한, 시공팀은 기사�
     { name: '가져온기사', loginId: 'impeng', password: '5874', department: '시공팀', position: '' },
     { name: '중복', loginId: 'admin', password: '1234', department: '본사', position: '' },
     { name: '짧은비번', loginId: 'shortpw', password: '12', department: '', position: '' },
+    { name: '청)이관기사', loginId: 'importeng2', password: '1234', department: '시공팀', position: '', phone: '010-0000-0000' },
   ];
   await admin.ok('users', 'create', { loginId: 'impmgr', password: 'impmgr1234', name: '가져오기확인' });
   const mgr = client();
@@ -866,7 +972,12 @@ test('직원 계정 일괄 등록: 실장은 기본 권한, 시공팀은 기사�
   assert.equal((await mgr('imports', 'users', rows)).status, 403, '관리자만');
   const r = await admin.ok('imports', 'users', rows);
   assert.equal(r.created, 1);
-  assert.equal(r.engineers, 1);
+  assert.equal(r.engineers, 2);
+  const moved = (await admin.ok('engineers', 'list', { includeInactive: true })).filter((e) => e.name === '청)이관기사');
+  assert.equal(moved.length, 1, "머리글('청)')이 붙은 이름도 같은 기사로 찾아 새로 만들지 않음");
+  assert.equal(moved[0].loginId, 'importeng2');
+  const s3 = client();
+  assert.equal((await s3.ok('auth', 'login', 'importeng2', '1234', '', 'engineer')).user.role, 'ENGINEER');
   assert.equal(r.skipped, 1);
   assert.equal(r.errors.length, 1);
   const u = (await admin.ok('users', 'list')).find((x) => x.loginId === '0638');
@@ -881,6 +992,220 @@ test('직원 계정 일괄 등록: 실장은 기본 권한, 시공팀은 기사�
   const again = await admin.ok('imports', 'users', rows.slice(0, 1));
   assert.equal(again.created, 0);
   assert.equal(again.skipped, 1);
+  // 비밀번호만 바꾸기: 실장은 바뀌고, 관리자 계정(admin)은 그대로
+  const reset = await admin.ok('imports', 'users', [{ ...rows[0], password: '1234' }, { ...rows[2], password: '1234' }], { resetPassword: true });
+  assert.equal(reset.updated, 1);
+  assert.equal(reset.skipped, 1);
+  assert.equal((await client().ok('auth', 'login', '0638', '1234')).user.name, '가져온실장');
+  assert.equal((await client()('auth', 'login', 'admin', '1234')).status, 400, '관리자 비밀번호는 안 바뀜');
+});
+
+test('상품 일괄 등록: 붙여넣은 목록을 상품으로, 빈 품목은 짐작, 노출 N 은 비활성, 다시 올려도 중복 없음', async () => {
+  const tag = Date.now() % 100000;
+  const rows = [
+    { name: `가져온패키지${tag}`, kind: '패키지', category: '줄눈', detail: '욕실 2곳 바닥', visible: true },
+    { name: `가져온코팅${tag}`, kind: '추가시공품목', category: '', detail: '샤워부스 유리 코팅', visible: false },
+    { name: `이상한구분${tag}`, kind: '없는구분', category: '없는품목', detail: '', visible: 'Y' },
+  ];
+  const mgr = client();
+  await mgr.ok('auth', 'login', 'impmgr', 'impmgr1234');
+  assert.equal((await mgr('imports', 'products', rows)).status, 403, '관리자만');
+  const r = await admin.ok('imports', 'products', rows);
+  assert.equal(r.created, 3);
+  const list = (await admin.ok('products', 'list', { includeInactive: true })).filter((p) => p.name.endsWith(String(tag)));
+  const by = (n) => list.find((p) => p.name.startsWith(n));
+  assert.equal(by('가져온패키지').category, '줄눈');
+  assert.equal(by('가져온패키지').price, 0);
+  assert.equal(by('가져온코팅').category, '나노코팅', '빈 품목은 이름·내용으로 짐작');
+  assert.equal(by('가져온코팅').visible, false);
+  assert.equal(by('이상한구분').kind, '패키지');
+  assert.equal(by('이상한구분').category, '줄눈');
+  const visible = await admin.ok('products', 'list');
+  assert.ok(!visible.some((p) => p.name === `가져온코팅${tag}`), '노출 N 은 계약서 상품목록에 안 보임');
+  const again = await admin.ok('imports', 'products', rows);
+  assert.equal(again.created, 0);
+  assert.equal(again.skipped, 3);
+});
+
+test('아파트 일괄 등록: 새 아파트 등록, 지역 빈 아파트는 지역만 채움, 같은 이름(띄어쓰기 무시)은 건너뜀', async () => {
+  const tag = Date.now() % 100000;
+  await admin.ok('apartments', 'save', { sido: '', sigungu: '', name: `지역없는단지${tag}` });
+  const rows = [
+    { sido: '경기도', sigungu: '성남시 수정구', name: `새단지${tag}` },
+    { sido: '강원특별자치도', sigungu: '강릉시', name: `지역없는 단지${tag}` },
+    { sido: '경기도', sigungu: '성남시 수정구', name: `새 단지${tag}` },
+  ];
+  const mgr = client();
+  await mgr.ok('auth', 'login', 'impmgr', 'impmgr1234');
+  assert.equal((await mgr('apartments', 'importMany', rows)).status, 403, '관리자만');
+  const r = await admin.ok('apartments', 'importMany', rows);
+  assert.deepEqual(r, { created: 1, updated: 1, skipped: 1 });
+  const list = (await admin.ok('apartments', 'list')).filter((a) => a.name.endsWith(String(tag)));
+  assert.equal(list.length, 2);
+  const filled = list.find((a) => a.name.startsWith('지역없는'));
+  assert.deepEqual([filled.sido, filled.sigungu], ['강원특별자치도', '강릉시']);
+  assert.deepEqual(await admin.ok('apartments', 'importMany', rows), { created: 0, updated: 0, skipped: 3 }, '다시 올려도 중복 없음');
+});
+
+test('시연 샘플 계약: 운영자만, 가짜 번호(010-0000)·변경이력 없음·수정로그 없음, 샘플만 지움', async () => {
+  const sup = client();
+  await sup.ok('auth', 'login', 'super', process.env.INIT_SUPER_PASSWORD);
+  const companyId = (await admin.ok('auth', 'me')).company.id;
+  assert.equal((await admin('contracts', 'sampleAdd', companyId, 5)).status, 403, '업체 관리자는 불가');
+  const mine = await admin.ok('contracts', 'create', { ...base, customerName: '진짜계약', customerPhone: '010-8282-1212' });
+  const logsBefore = (await admin.ok('auditLogs', 'list', {})).rows.length;
+  const r = await sup.ok('contracts', 'sampleAdd', companyId, 5);
+  assert.equal(r.created, 5);
+  const list = await admin.ok('contracts', 'list', {});
+  const samples = list.filter((c) => /^010-0000-/.test(c.customerPhone));
+  assert.ok(samples.length >= 5, '010-0000 번호');
+  const one = await admin.ok('contracts', 'get', samples[0].id);
+  assert.equal(one.history.length, 0, '변경이력 없음');
+  assert.equal((await admin.ok('auditLogs', 'list', {})).rows.length, logsBefore, '수정로그 없음');
+  const cleared = await sup.ok('contracts', 'sampleClear', companyId);
+  assert.ok(cleared.removed >= 5);
+  const after = await admin.ok('contracts', 'list', {});
+  assert.ok(!after.some((c) => /^010-0000-/.test(c.customerPhone)), '샘플은 모두 지움');
+  assert.ok(after.some((c) => c.id === mine.id), '직접 등록한 계약은 그대로');
+});
+
+test('AS관리: 보낸 계약은 AS관리에만, AS 완료해도 AS관리에 남고 재발하면 회차가 쌓임, 변경이력 남김', async () => {
+  const c = await admin.ok('contracts', 'create', { ...base, customerName: 'AS고객', customerPhone: '010-5656-7878' });
+  assert.equal((await admin('contracts', 'setAs', [c.id], true, { request: '' })).status, 400, 'AS 요청 내용 필수');
+  await admin.ok('contracts', 'setAs', [c.id], true, { date: '2026-10-20', request: '욕실 줄눈 들뜸' });
+  assert.ok(!(await admin.ok('contracts', 'list', {})).some((x) => x.id === c.id), '계약관리 목록에서 빠짐');
+  const info = (await admin.ok('contracts', 'list', { as: true })).find((x) => x.id === c.id).asInfo;
+  assert.deepEqual([info.date, info.request], ['2026-10-20', '욕실 줄눈 들뜸'], 'AS 접수 내용');
+  assert.ok((await admin.ok('contracts', 'list', { as: true })).some((x) => x.id === c.id), 'AS관리 목록에 있음');
+  const got = await admin.ok('contracts', 'get', c.id);
+  assert.ok(got.asAt, 'AS 표시');
+  assert.equal(got.history.at(-1).action, 'AS관리로 이동');
+  // AS 완료: AS관리에 그대로 두고 완료 표시만
+  await admin.ok('contracts', 'setAs', [c.id], false);
+  assert.ok(!(await admin.ok('contracts', 'list', {})).some((x) => x.id === c.id), 'AS 완료해도 계약관리로 안 돌아감');
+  const done = (await admin.ok('contracts', 'list', { as: true })).find((x) => x.id === c.id);
+  assert.ok(done, 'AS관리에 그대로');
+  assert.equal(done.asInfo, null, '처리 중 회차 없음 = 완료');
+  assert.ok(done.asLogs[0].doneAt, '1회차에 완료일');
+  // 재발: 다시 AS 접수 → 2회차, 처리 중 추가 접수 → 3회차
+  await admin.ok('contracts', 'setAs', [c.id], true, { request: '같은 곳 재발' });
+  await admin.ok('contracts', 'setAs', [c.id], true, { request: '현관도 추가' });
+  const again = await admin.ok('contracts', 'get', c.id);
+  assert.equal(again.asLogs.length, 3, 'AS 회차가 쌓임');
+  assert.equal(again.asInfo.request, '현관도 추가');
+  assert.deepEqual(again.asLogs.map((l) => !!l.doneAt), [true, false, false]);
+});
+
+test('AS 사진: 접수하면서 사진 첨부(한 건·여러 건), 회차별로 보기, 입금을 바꿔도 사진은 그대로', async () => {
+  const img = (n) => 'data:image/jpeg;base64,' + Buffer.from(`as-photo-${n}`).toString('base64');
+  const one = await admin.ok('contracts', 'create', { ...base, customerName: 'AS사진고객', customerPhone: '010-7171-2323', payments: [{ date: '2026-10-01', kind: '계약금', method: '계좌이체', amount: 10000 }] });
+  const two = await admin.ok('contracts', 'create', { ...base, customerName: 'AS사진고객2', customerPhone: '010-7171-2424' });
+  assert.equal((await admin('contracts', 'setAs', [one.id], true, { request: '들뜸', photos: [1, 2, 3, 4, 5, 6].map(img) })).status, 400, '최대 5장');
+  assert.equal((await admin('contracts', 'setAs', [one.id], true, { request: '들뜸', photos: ['not-an-image'] })).status, 400, '사진만');
+  await admin.ok('contracts', 'setAs', [one.id], true, { request: '욕실 들뜸', photos: [img(1), img(2)] });
+  await admin.ok('contracts', 'setAs', [one.id], true, { request: '현관 추가' }); // 2회차는 사진 없이
+  await admin.ok('contracts', 'setAs', [one.id, two.id], true, { request: '함께 접수', photos: [img(3)] }); // 여러 건 한꺼번에
+  const got = await admin.ok('contracts', 'get', one.id);
+  assert.deepEqual(got.asLogs.map((l) => l.photoCount || 0), [2, 0, 1], '회차마다 사진 장수');
+  assert.deepEqual((await admin.ok('contracts', 'asPhotos', one.id, 0)).map((r) => r.image), [img(1), img(2)], '1회차 사진');
+  assert.equal((await admin.ok('contracts', 'asPhotos', one.id, 1)).length, 0);
+  assert.deepEqual((await admin.ok('contracts', 'asPhotos', two.id, 0)).map((r) => r.image), [img(3)], '여러 건 접수 → 각 계약에 사진');
+  assert.ok(!JSON.stringify(await admin.ok('contracts', 'list', { as: true })).includes(img(1)), '목록에는 사진을 싣지 않음');
+  // 입금을 지워도(영수증 정리) AS 사진은 남음
+  await admin.ok('contracts', 'removePayment', one.id, got.payments[0].id);
+  assert.equal((await admin.ok('contracts', 'asPhotos', one.id)).length, 3, '입금 정리와 무관');
+});
+
+test('동명이인: 이름이 같아도 전화번호가 다르면 다른 계약자·다른 계약서, 전화번호 없으면 현장까지 같아야 같은 계약자', async () => {
+  const p = { ...base, brand: '더좋은집', category: '줄눈' };
+  const a = await admin.ok('contracts', 'create', { ...p, customerName: '동명이', customerPhone: '010-8181-0001', aptName: '가아파트', dong: '1', ho: '1' });
+  const b = await admin.ok('contracts', 'create', { ...p, customerName: '동명이', customerPhone: '010-8181-0002', aptName: '나아파트', dong: '2', ho: '2' });
+  assert.notEqual(a.customerId, b.customerId, '번호 다른 동명이인 = 다른 계약자');
+  // 가족이 같은 번호를 써도 이름이 다르면 다른 계약자
+  const fam = await admin.ok('contracts', 'create', { ...p, customerName: '가족이', customerPhone: '010-8181-0001', aptName: '가아파트', dong: '1', ho: '1' });
+  assert.notEqual(fam.customerId, a.customerId, '같은 번호·다른 이름 = 다른 계약자');
+  // 같은 사람(이름+번호)은 같은 계약자
+  const a2 = await admin.ok('contracts', 'create', { ...p, category: '청소', customerName: '동 명이', customerPhone: '01081810001', aptName: '가아파트', dong: '1', ho: '1' });
+  assert.equal(a2.customerId, a.customerId, '띄어쓰기·하이픈 차이는 같은 사람');
+  assert.deepEqual((await admin.ok('contracts', 'signBundle', a.id)).contracts.map((c) => c.id), [a.id, a2.id], '본인 줄눈·청소는 한 장');
+  assert.deepEqual((await admin.ok('contracts', 'signBundle', b.id)).contracts.map((c) => c.id), [b.id], '동명이인 계약은 섞이지 않음');
+  const g = await admin.ok('contracts', 'group', a.id);
+  assert.equal(g.customer.name, '동명이');
+  assert.ok(!g.otherContracts.some((c) => c.id === b.id || c.id === fam.id), '다른 사람 계약이 계약자 탭에 안 나옴');
+  // 같은 사람이 나중에 또 계약: 같은 계약자로 쌓이고, 계약서는 그날 계약한 것끼리만 한 장
+  const later = await admin.ok('contracts', 'create', { ...p, contractDate: '2026-12-20', customerName: '동명이', customerPhone: '010-8181-0001', aptName: '마아파트', dong: '5', ho: '5' });
+  assert.equal(later.customerId, a.customerId, '재계약 = 같은 계약자');
+  assert.deepEqual((await admin.ok('contracts', 'signBundle', later.id)).contracts.map((c) => c.id), [later.id], '다른 날 계약은 따로 서명');
+  assert.ok((await admin.ok('contracts', 'group', a.id)).otherContracts.some((c) => c.id === later.id), '계약자 탭에 같은 사람의 다른 계약');
+});
+
+test('계약자 연결 바로잡기: 예전에 번호만으로 잘못 묶인 계약을 이름+번호로 다시 연결 (한 번만)', async () => {
+  const x = await admin.ok('contracts', 'create', { ...base, customerName: '연결갑', customerPhone: '010-9292-0001' });
+  const y = await admin.ok('contracts', 'create', { ...base, customerName: '연결을', customerPhone: '010-9292-0001' });
+  // 예전 방식으로 잘못 묶인 상태를 만듦 (을의 계약이 갑의 계약자에 연결)
+  const c = new pg.Client({ connectionString: url });
+  await c.connect();
+  await c.query(`UPDATE contracts SET data = jsonb_set(data, '{customerId}', to_jsonb($1::bigint)) WHERE id = $2`, [x.customerId, y.id]);
+  await c.query(`UPDATE companies SET data = data - 'customerLinksFixed'`);
+  await c.end();
+  assert.equal((await admin.ok('contracts', 'get', y.id)).customerId, x.customerId);
+  const r = await admin.ok('contracts', 'repairCustomerLinks');
+  assert.ok(r.fixed >= 1);
+  const fixed = await admin.ok('contracts', 'get', y.id);
+  assert.notEqual(fixed.customerId, x.customerId, '을의 계약은 을의 계약자로');
+  assert.equal((await admin.ok('contracts', 'group', y.id)).customer.name, '연결을');
+  assert.equal((await admin.ok('contracts', 'repairCustomerLinks')).fixed, 0, '두 번째는 할 일 없음');
+});
+
+test('박람회 일정: 이름·장소, 관리자는 바로·실장은 권한 받아야 등록·전체 보기, 권한 없으면 본인 것만, 기사는 본인 것만, 여러 날, 수정·삭제', async () => {
+  const me = (await manager.ok('auth', 'me')).user;
+  const adminMe = (await admin.ok('auth', 'me')).user;
+  const eng = (await admin.ok('engineers', 'list')).find((e) => e.loginId === 'gong');
+  const gong = client(); await gong.ok('auth', 'login', 'gong', 'gong1234', '', 'engineer');
+  assert.equal((await admin('fairs', 'save', { date: '2026-12-05', name: '', place: '', staffIds: [me.id] })).status, 400, '이름 필수');
+  assert.equal((await admin('fairs', 'save', { date: '2026-12-05', name: '지제역 필해링턴', staffIds: [], engineerIds: [] })).status, 400, '가는 사람 필수');
+  assert.equal((await admin('fairs', 'save', { date: '2026-12-05', endDate: '2026-12-01', name: 'x', staffIds: [me.id] })).status, 400, '끝나는 날짜가 앞이면 안 됨');
+  // 관리자만 가는 박람회 / 실장+기사가 가는 박람회
+  const onlyAdmin = await admin.ok('fairs', 'save', { date: '2026-12-05', name: '관리자 박람회', place: '서울', staffIds: [adminMe.id] });
+  const f = await admin.ok('fairs', 'save', { date: '2026-12-05', endDate: '2026-12-07', name: '지제역 필해링턴', place: '수원', staffIds: [me.id, 999999], engineerIds: [eng.id, 999999] });
+  assert.equal(f.label, '지제역 필해링턴 (수원)');
+  assert.deepEqual(f.staff.map((x) => x.name), [me.name], '없는 사람은 빠짐');
+  assert.deepEqual(f.engineers.map((x) => x.name), [eng.name]);
+  // 실장: 본인이 포함된 것만 (관리자 박람회는 안 보임), 여러 날 박람회는 기간이 겹치면
+  const seen = await manager.ok('fairs', 'list', { from: '2026-12-06', to: '2026-12-06' });
+  assert.deepEqual(seen.map((x) => x.id), [f.id], '본인 것만');
+  assert.equal((await manager.ok('fairs', 'list', { from: '2026-12-05', to: '2026-12-05' })).some((x) => x.id === onlyAdmin.id), false, '남의 박람회는 안 보임');
+  assert.equal((await manager.ok('fairs', 'list', { from: '2026-12-08', to: '2026-12-31' })).some((x) => x.id === f.id), false);
+  assert.equal((await admin.ok('fairs', 'list', { from: '2026-12-05', to: '2026-12-05' })).length, 2, '관리자는 전부');
+  // 기사: 기사모바일에서 본인이 포함된 것만
+  const mineEng = await gong.ok('engineerApp', 'myFairs', { from: '2026-12-01', to: '2026-12-31' });
+  assert.deepEqual(mineEng.map((x) => x.label), ['지제역 필해링턴 (수원)']);
+  // 실장은 권한이 없으면 등록·수정·삭제 불가 → 관리자가 사용자관리에서 권한 주면 가능
+  assert.ok(!(await manager.ok('auth', 'me')).user.permissions.includes('fair.manage'), '실장 기본 권한에는 없음');
+  assert.equal((await manager('fairs', 'save', { date: '2026-12-10', name: '실장 등록', staffIds: [me.id] })).status, 403);
+  assert.equal((await manager('fairs', 'remove', f.id)).status, 403);
+  const u = (await admin.ok('users', 'list')).find((x) => x.id === me.id);
+  await admin.ok('users', 'update', u.id, { permissions: [...u.permissions, 'fair.manage'] });
+  assert.equal((await manager.ok('fairs', 'list', { from: '2026-12-05', to: '2026-12-05' })).length, 2, '박람회 권한을 받은 실장은 전체 박람회를 봄');
+  const mine = await manager.ok('fairs', 'save', { date: '2026-12-10', name: '실장 등록', staffIds: [me.id] });
+  await manager.ok('fairs', 'save', { id: mine.id, date: '2026-12-11', name: '실장 등록 (바뀜)', place: '평택', staffIds: [me.id] });
+  assert.equal((await manager.ok('fairs', 'list', { from: '2026-12-11', to: '2026-12-11' })).find((x) => x.id === mine.id).label, '실장 등록 (바뀜) (평택)');
+  // 예전 화면(장소 한 칸)으로 보내도 이름으로 저장
+  const old = await admin.ok('fairs', 'save', { date: '2026-12-20', place: '예전 방식', staffIds: [adminMe.id] });
+  assert.equal(old.name, '예전 방식');
+  for (const x of [mine.id]) await manager.ok('fairs', 'remove', x);
+  for (const x of [f.id, onlyAdmin.id, old.id]) await admin.ok('fairs', 'remove', x);
+  assert.equal((await admin.ok('fairs', 'list', { from: '2026-12-01', to: '2026-12-31' })).length, 0, '삭제됨');
+  await admin.ok('users', 'update', u.id, { permissions: u.permissions }); // 다른 시험에 영향 없게 되돌림
+});
+
+test('상품 줄: 상품명 없이 금액만 있는 줄은 저장을 막고(금액이 사라지지 않게), 완전히 빈 줄은 무시', async () => {
+  const bad = await admin('contracts', 'create', { ...base, customerName: '빈줄고객', customerPhone: '010-9191-8282', lineItems: [{ name: '', qty: 1, unitPrice: 300000 }] });
+  assert.equal(bad.status, 400);
+  assert.match(bad.error.message, /상품명/);
+  const ok = await admin.ok('contracts', 'create', { ...base, customerName: '빈줄고객', customerPhone: '010-9191-8282', lineItems: [{ name: '줄눈', qty: 1, unitPrice: 300000 }, { name: '', qty: 1, unitPrice: 0 }] });
+  assert.equal(ok.lineItems.length, 1);
+  assert.equal(ok.totalAmount, 300000);
 });
 
 test('기사모바일 계약 상세: 본인 배정 계약만, 단가·내부 메모·이력은 숨김', async () => {
@@ -971,7 +1296,9 @@ test('알림톡 발송 기록: 비즈고 연결 전에는 기록만(MOCK), 템�
     variables: { 고객명: '알림고객', ecode: 'abc', 엉뚱한값: 'x' }, buttons: [{ name: '계약서 확인·서명', url: 'https://veritybase.vercel.app/e/?q=abc' }],
     target: '고객', brand: '더좋은집', receiverName: '알림고객', receiverPhone: '010-5656-7878', message: '알림고객님, 계약 내용을 확인하시고 서명해 주세요.',
   });
-  assert.deepEqual(log.variables, { 고객명: '알림고객', ecode: 'abc' }, '템플릿에 있는 빈칸만');
+  assert.deepEqual(Object.keys(log.variables), ['고객명', 'ecode'], '템플릿에 있는 빈칸만');
+  const { token: ct } = await admin.ok('contracts', 'customerLink', c.id);
+  assert.equal(log.variables.ecode, ct, '이 계약 것이 아닌 링크 값(abc)은 서버가 진짜 값으로 바꿈 (서명 요청 전이면 고객확인페이지 값)');
   assert.equal(log.result, 'MOCK', '키 없으면 기록만');
 });
 
@@ -1071,7 +1398,8 @@ test('비즈고 알림톡: 키는 Authorization 헤더로, 템플릿 자동 치�
     assert.equal(sentLog.templateCode, 'contract_good10');
     const last = seen.filter((x) => x.url === '/api/comm/v1/send/omni').at(-1);
     assert.deepEqual(last.body.messageFlow[0].alimtalk, { senderKey: 'SK123', templateCode: 'contract_good10', sendType: 'template' });
-    assert.deepEqual(last.body.destinations[0].replaceWords, { 고객명: '실발송', ecode: 'CT' });
+    const { token: realCt } = await admin.ok('contracts', 'customerLink', c.id);
+    assert.deepEqual(last.body.destinations[0].replaceWords, { 고객명: '실발송', ecode: realCt }, '링크 값은 서버가 이 계약의 진짜 값으로');
     assert.equal((await sup.ok('notifications', 'gatewayStatus')).companies.find((x) => x.id === myCompanyId).brands.더좋은집.codes.계약완료, 'contract_good10');
 
     // 발신프로필 키를 직접 넣으면 목록 조회 없이 그 키로
@@ -1109,4 +1437,301 @@ test('비즈고 알림톡: 키는 Authorization 헤더로, 템플릿 자동 치�
     delete process.env.BIZGO_BASE_URL;
     mock.close();
   }
+});
+
+test('알림톡: 따로 권한 없이 계약을 볼 수 있는 직원이면 모든 알림톡 발송, 기사는 불가', async () => {
+  await admin.ok('users', 'create', { loginId: 'talkmgr', password: 'talkmgr1234', name: '알림톡실장', permissions: ['contract.view'], dataScope: 'all' });
+  const mgr = client();
+  await mgr.ok('auth', 'login', 'talkmgr', 'talkmgr1234');
+  const [c] = await admin.ok('contracts', 'list', {});
+  const msg = { contractId: c.id, brand: '더좋은집', receiverName: '고객', receiverPhone: '010-1234-5678', message: '안내', target: '고객' };
+  assert.equal((await mgr.ok('notifications', 'send', { ...msg, template: '서명요청', templateKey: '서명요청' })).templateKey, '서명요청');
+  assert.equal((await mgr.ok('notifications', 'send', { ...msg, template: '계약완료', templateKey: '계약완료' })).templateKey, '계약완료');
+  assert.equal((await mgr.ok('notifications', 'send', { ...msg, template: '기사배정', templateKey: '기사배정_고객' })).templateKey, '기사배정_고객');
+  assert.ok((await mgr.ok('notifications', 'history', c.id)).length >= 3);
+  await admin.ok('engineers', 'save', { name: '알림톡기사', phone: '010-5252-6363', loginId: 'talkeng', password: 'talkeng1234' });
+  const eng = client();
+  await eng.ok('auth', 'login', 'talkeng', 'talkeng1234');
+  assert.equal((await eng('notifications', 'send', { ...msg, template: '계약완료', templateKey: '계약완료' })).status, 403, '기사는 불가');
+});
+
+test('현장 서명: 계약 등록 권한만 있어도 서명 요청(등록 직후 그 자리에서), 묶음 계약 번호를 돌려줌', async () => {
+  await admin.ok('users', 'create', { loginId: 'onsitemgr', password: 'onsite1234', name: '현장서명실장', permissions: ['contract.view', 'contract.create'], dataScope: 'all' });
+  const mgr = client();
+  await mgr.ok('auth', 'login', 'onsitemgr', 'onsite1234');
+  const base = { brand: '더좋은집', customerName: '현장서명고객', customerPhone: '010-8282-9393', aptName: '현장서명아파트', dong: '1', ho: '101', contractDate: '2026-11-03', workType: '시공', receptionType: '박람회' };
+  const a = await mgr.ok('contracts', 'create', { ...base, category: '줄눈' });
+  const b = await mgr.ok('contracts', 'create', { ...base, category: '청소' });
+  const r = await mgr.ok('contracts', 'requestSign', a.id);
+  assert.deepEqual([...r.ids].sort((x, y) => x - y), [a.id, b.id].sort((x, y) => x - y), '줄눈·청소는 한 장으로');
+  await admin.ok('users', 'create', { loginId: 'viewonlymgr', password: 'viewonly1234', name: '조회만실장', permissions: ['contract.view'], dataScope: 'all' });
+  const v = client();
+  await v.ok('auth', 'login', 'viewonlymgr', 'viewonly1234');
+  assert.equal((await v('contracts', 'requestSign', a.id)).status, 403, '조회만 가능하면 서명 요청 불가');
+});
+
+test('계약 등록 → 계약자관리 자동 등록 (이름·연락처①②·주소=현장), 같은 번호면 기존 계약자에 연결하고 빈 칸만 채움', async () => {
+  const base = { brand: '더좋은집', contractDate: '2026-11-03', workType: '시공', receptionType: '박람회', category: '줄눈' };
+  const c = await admin.ok('contracts', 'create', { ...base, customerName: '자동계약자', customerPhone: '010-6161-7272', customerPhone2: '010-6161-8383', aptName: '자동힐스', dong: '101', ho: '1203' });
+  let [cust] = await admin.ok('customers', 'list', '010-6161-7272');
+  assert.equal(cust.id, c.customerId);
+  assert.equal(cust.name, '자동계약자');
+  assert.equal(cust.phone2, '010-6161-8383');
+  assert.equal(cust.address1, '자동힐스 101동 1203호');
+  assert.equal(cust.contractCount, 1);
+  await admin.ok('contracts', 'create', { ...base, category: '청소', customerName: '자동계약자', customerPhone: '010-6161-7272', aptName: '자동힐스', dong: '101', ho: '1203' });
+  const all = await admin.ok('customers', 'list', '010-6161-7272');
+  assert.equal(all.length, 1, '같은 번호는 계약자 하나');
+  assert.equal(all[0].contractCount, 2);
+});
+
+test('수정로그 제외: 고객 서명, 상품 등록·수정·삭제, 아파트 가져오기', async () => {
+  const tag = `${Date.now() % 1000000}`; // 시험 DB 에 남은 예전 기록과 섞이지 않게
+  const logs = async (q) => (await admin.ok('auditLogs', 'list', { q })).rows;
+  const p = await admin.ok('products', 'save', { name: `로그제외상품${tag}`, kind: '패키지', category: '줄눈', price: 100000 });
+  await admin.ok('products', 'save', { ...p, price: 120000 });
+  await admin.ok('products', 'remove', p.id);
+  assert.equal((await logs(`로그제외상품${tag}`)).length, 0, '상품은 안 남음');
+  await admin.ok('apartments', 'importMany', [{ name: `로그제외아파트${tag}`, sido: '서울특별시', sigungu: '강남구' }]);
+  assert.equal((await logs(`로그제외아파트${tag}`)).length, 0, '아파트 가져오기는 안 남음');
+  const who = `로그서명${tag}`;
+  const c = await admin.ok('contracts', 'create', { brand: '더좋은집', customerName: who, customerPhone: '010-4747-5858', aptName: '로그아파트', contractDate: '2026-11-03', workType: '시공', receptionType: '박람회', category: '줄눈' });
+  const { token } = await admin.ok('contracts', 'requestSign', c.id);
+  await client().ok('esign', 'sign', token, { signerName: who, signature: `data:image/png;base64,${'A'.repeat(200)}`, agreed: true });
+  const rows = await logs(who);
+  assert.ok(rows.some((r) => r.call === 'contracts.create'), '계약 등록은 남음');
+  assert.ok(!rows.some((r) => r.call === 'esign.sign'), '고객 서명은 안 남음');
+});
+
+test('수정로그: 예전에 남은 고객 서명·상품·아파트 가져오기 기록도 목록에서 숨김', async () => {
+  const { getPool } = await import('../server/pg.js');
+  const companyId = (await admin.ok('auth', 'me')).user.companyId;
+  const tag = `예전기록${Date.now() % 1000000}`;
+  for (const call of ['esign.sign', 'products.save', 'products.remove', 'imports.products', 'apartments.importMany', 'contracts.update']) {
+    await getPool().query(`INSERT INTO audit_logs (company_id, data) VALUES ($1, $2::jsonb)`, [companyId, JSON.stringify({ action: `${tag} ${call}`, call, actor: { name: '시험' }, items: [] })]);
+  }
+  const { rows } = await admin.ok('auditLogs', 'list', { q: tag });
+  assert.deepEqual(rows.map((r) => r.call), ['contracts.update'], '계약 수정만 보임');
+});
+
+test('기사 시공 기록: 시공완료 때 범위(완료·미시공)·자재 → 누가·언제와 함께 저장, 사무실 수정에도 유지, 다른 상태면 지움', async () => {
+  const eng = client();
+  await eng.ok('auth', 'login', 'gong', 'gong1234');
+  const engId = (await eng.ok('auth', 'me')).user.engineerId;
+  const c = await admin.ok('contracts', 'create', {
+    ...base,
+    customerName: '범위고객',
+    customerPhone: '010-3434-5656',
+    category: '줄눈',
+    lineItems: [{ name: '진아리채2', detail: '진아리채2 : 욕실2곳 바닥(빅라이언)+현관s.v(폴리) + 욕조벽ㄷ자(폴리)', qty: 1, unitPrice: 500000 }],
+    items: '베란다 줄눈',
+    schedules: [{ date: '2026-12-15', time: '10:00', assignType: 'engineer', engineerId: engId }],
+  });
+  const mine = (await eng.ok('engineerApp', 'mySchedules', { from: '2026-12-15', to: '2026-12-15' })).find((x) => x.contractId === c.id);
+  assert.deepEqual(mine.scope, [
+    { group: '진아리채2', parts: ['욕실2곳 바닥(빅라이언)', '현관s.v(폴리)', '욕조벽ㄷ자(폴리)'] },
+    { group: '추가 시공내용', parts: ['베란다 줄눈'] },
+  ], "상세품목을 '+'로 나누고 '상품명 :' 머리는 뺌");
+  await eng.ok('engineerApp', 'report', {
+    contractId: c.id,
+    stepIndex: 0,
+    mobileStatus: '시공완료',
+    memo: '',
+    items: [
+      { text: '욕실2곳 바닥(빅라이언)', done: true, material: '빅라이언 화이트', worker: '' },
+      { text: '현관s.v(폴리)', done: true, material: '크린파파 위너스', color: '101', worker: '김민수 팀장' },
+      { text: '욕조벽ㄷ자(폴리)', done: false },
+      { text: '베란다 줄눈', done: true },
+    ],
+    material: '빅라이언 화이트',
+    helpers: '김민수 팀장',
+    note: '욕조벽은 절반만, 나머지 다음 방문',
+  });
+  let got = await admin.ok('contracts', 'get', c.id);
+  const rec = got.schedules[0].workRecord;
+  assert.deepEqual(rec.undone, ['욕조벽ㄷ자(폴리)']);
+  assert.equal(rec.material, '빅라이언 화이트');
+  assert.equal(rec.note, '욕조벽은 절반만, 나머지 다음 방문', '직접 적은 시공 내용');
+  assert.equal(rec.helpers, '김민수 팀장', '함께한 사람');
+  assert.deepEqual(rec.items[1], { text: '현관s.v(폴리)', done: true, material: '크린파파 위너스', color: '101', worker: '김민수 팀장' }, '항목별 자재·번호·작업자');
+  assert.ok(got.history.some((h) => h.changes?.some((x) => x.label === '완료' && x.to.includes('크린파파 위너스 101번'))), '변경이력: 자재 101번');
+  assert.deepEqual(rec.done, ['욕실2곳 바닥(빅라이언)', '현관s.v(폴리)', '베란다 줄눈']);
+  assert.ok(rec.by && rec.at, '누가·언제');
+  assert.ok(got.history.some((h) => h.changes?.some((x) => x.label === '미시공')), '변경이력에도 남음');
+  await admin.ok('contracts', 'update', c.id, { ...got, memo: '사무실 수정' });
+  got = await admin.ok('contracts', 'get', c.id);
+  assert.equal(got.schedules[0].workRecord?.material, '빅라이언 화이트', '사무실이 계약을 고쳐도 유지');
+  await eng.ok('engineerApp', 'report', { contractId: c.id, stepIndex: 0, mobileStatus: '시공연기요청', memo: '' });
+  got = await admin.ok('contracts', 'get', c.id);
+  assert.equal(got.schedules[0].workRecord, undefined, '시공완료가 아니면 지움');
+});
+
+test('일정관리설정: 시공 자재 목록 저장 (빈 줄·중복 제거), 기사 화면에서도 보임', async () => {
+  const cur = await admin.ok('scheduleSettings', 'get');
+  assert.ok(Array.isArray(cur.materials) && cur.materials.length > 0, '기본 자재 목록');
+  const saved = await admin.ok('scheduleSettings', 'save', { ...cur, materials: ['크린파파 위너스', '', '빅라이언', '빅라이언 ', '케라폭시'] });
+  assert.deepEqual(saved.materials, ['크린파파 위너스', '빅라이언', '케라폭시']);
+  const eng = client();
+  await eng.ok('auth', 'login', 'gong', 'gong1234');
+  assert.deepEqual((await eng.ok('auth', 'me')).company.scheduleSettings.materials, ['크린파파 위너스', '빅라이언', '케라폭시']);
+  await admin.ok('scheduleSettings', 'save', cur);
+});
+
+test('로그인 주소별 첫 화면 이름 (링크 미리보기·홈 화면): /업체, /t, /m, /c', async () => {
+  const { pageMeta, injectMeta, manifestFor, validCode } = await import('../server/page.js');
+  const html = '<html><head><title>VerityBase - 계약관리</title><link rel="manifest" href="/manifest.webmanifest" /><meta name="apple-mobile-web-app-title" content="VerityBase" /></head><body></body></html>';
+  const m = pageMeta('thegood', 'm', '더좋은집');
+  assert.equal(m.title, '기사모바일 · 더좋은집 VerityBase');
+  assert.equal(m.short, '더좋은집 기사');
+  assert.equal(pageMeta('thegood', 't', '더좋은집').short, '더좋은집 상담');
+  assert.equal(pageMeta('thegood', '', '더좋은집').title, '일반화면 · 더좋은집 VerityBase');
+  assert.equal(pageMeta('thegood', 'c', '더좋은집').title, '내 계약 확인 · 더좋은집');
+  const out = injectMeta(html, m);
+  assert.match(out, /<title>기사모바일 · 더좋은집 VerityBase<\/title>/);
+  assert.match(out, /apple-mobile-web-app-title" content="더좋은집 기사"/);
+  assert.match(out, /og:title" content="기사모바일 · 더좋은집 VerityBase"/);
+  assert.match(out, /rel="manifest" href="\/api\/page\?manifest=1&amp;code=thegood&amp;kind=m"/);
+  assert.deepEqual([manifestFor(m).short_name, manifestFor(m).start_url], ['더좋은집 기사', '/thegood/m']);
+  assert.equal(pageMeta('contracts', '', '아무개'), null, '화면 이름은 업체 주소가 아님');
+  assert.equal(validCode('admin'), false);
+  assert.equal(injectMeta(html, null), html, '업체를 못 찾으면 원래 화면 그대로');
+  assert.ok(!injectMeta(html, pageMeta('thegood', '', '<b>"x"')).includes('<b>"x"'), '이름 속 특수문자 처리');
+  // 서버 함수: 실제 업체 이름을 DB에서 찾아 넣음
+  const { default: page } = await import('../api/page.js');
+  const res = { headers: {}, setHeader(k, v) { this.headers[k] = v; }, status(c) { this.code = c; return this; }, send(b) { this.body = b; return this; } };
+  await page({ query: { code: 'thegood', kind: 'm', manifest: '1' }, headers: { host: 'test.local' } }, res);
+  assert.equal(JSON.parse(res.body).short_name, '더좋은집 기사');
+});
+
+test('계약 가져오기: 시공일자 ①② (시간·오전/오후), 기사 ①② 배정, 시공완료일까지 — 기사 이름 앞 표시가 달라도 같은 기사로', async () => {
+  const { parseLegacyHtml, mapLegacyRow } = await import('../frontend/src/utils/legacyImport.js');
+  await admin.ok('imports', 'engineers', [{ name: '박영노' }, { name: '줄)김준영2' }]);
+  const tr = (no, d1, w1, d2, w2, status) => `<tr>
+    <td>${no}</td><td>더좋은집</td><td>줄눈</td><td>박람</td><td>시공</td><td>${status}</td><td>2026-05-02</td>
+    <td>일정확인고객${no}(승인)</td><td>010-7272-${String(no).slice(-4)}</td><td>일정아파트101-${no}</td><td>84A</td>
+    <td>1,000,000</td><td>할인금액 : 0</td><td>상품권 : 0</td><td>1,000,000</td><td>0</td><td>1,000,000</td>
+    <td>① : ${d1}</td><td>② : ${d2}</td><td>${status}</td><td>① : ${w1}</td><td>② : ${w2}</td><td></td><td></td><td></td><td></td></tr>`;
+  const html = `<table><thead><tr><td>번호</td></tr></thead><tbody>
+    ${tr(9101, '2026-06-03(10:30)', '청)박영노', '2026-06-04(오후)', '김준영2', '시공완료')}
+    ${tr(9102, '2026-06-05(오전)', '', '', '', '미정')}
+  </tbody></table>`;
+  const rows = parseLegacyHtml(html).map(mapLegacyRow);
+  assert.deepEqual(rows[0].schedules.map((s) => [s.date, s.time, s.ampm || '', s.engineerName]), [
+    ['2026-06-03', '10:30', '', '청)박영노'],
+    ['2026-06-04', '', 'PM', '김준영2'],
+  ]);
+  const r = await admin.ok('imports', 'contracts', rows);
+  assert.equal(r.created, 2, JSON.stringify(r.errors));
+  assert.deepEqual(r.newEngineers, [], "'청)박영노'·'김준영2'는 이미 있는 '박영노'·'줄)김준영2'와 같은 기사 (새로 안 만듦)");
+  const engs = await admin.ok('engineers', 'list');
+  const idOf = (n) => engs.find((e) => e.name === n).id;
+  const list = await admin.ok('contracts', 'list', {});
+  const full = await admin.ok('contracts', 'get', list.find((x) => x.customerName === '일정확인고객9101').id);
+  assert.deepEqual(full.schedules.slice(0, 2).map((s) => [s.date, s.time, s.ampm, s.engineerId]), [
+    ['2026-06-03', '10:30', '', idOf('박영노')],
+    ['2026-06-04', '', 'PM', idOf('줄)김준영2')],
+  ]);
+  assert.equal(full.status, '시공완료');
+  assert.equal(full.completedDate, '2026-06-04', '완료일 = 마지막 시공일');
+  const day = await admin.ok('schedules', 'list', { from: '2026-06-03', to: '2026-06-05' });
+  assert.ok(day.some((x) => x.contract?.customerName === '일정확인고객9102' && !x.engineerId), '기사 없는 일정도 달력에 (미정)');
+});
+
+test('계약 가져오기 [파일대로 맞추기]: 이미 가져온 계약의 시공일·기사·시공상태만 갱신, 비어 있는 회차·입금은 그대로', async () => {
+  await admin.ok('imports', 'engineers', [{ name: '맞춤기사' }]);
+  const base = { legacyNo: '9301', brand: '더좋은집', category: '줄눈', receptionType: '박람회', workType: '시공', contractDate: '2026-07-01', customerName: '맞춤고객', customerPhone: '010-9393-1010', aptName: '맞춤아파트', dong: '1', ho: '101', totalAmount: 500000, discount: 0, voucher: 0, payments: [{ date: '2026-07-01', kind: '계약금', method: '계좌이체', amount: 100000 }] };
+  await admin.ok('imports', 'contracts', [{ ...base, status: '미정', schedules: [{ date: '', time: '', engineerName: '' }] }]);
+  const list = await admin.ok('contracts', 'list', {});
+  const id = list.find((x) => x.customerName === '맞춤고객').id;
+  // 우리 쪽에서 ②회차를 직접 입력해 둠
+  const before = await admin.ok('contracts', 'get', id);
+  await admin.ok('contracts', 'update', id, { ...before, schedules: [before.schedules[0], { date: '2026-07-20', time: '14:00', assignType: 'engineer' }] });
+  const fileRow = { ...base, status: '시공완료', completedDate: '2026-07-10', schedules: [{ date: '2026-07-10', time: '09:00', engineerName: '청)맞춤기사' }, { date: '', time: '', engineerName: '' }] };
+  const skip = await admin.ok('imports', 'contracts', [fileRow]);
+  assert.deepEqual([skip.created, skip.skipped, skip.updated], [0, 1, 0], '맞추기 없이는 건너뜀');
+  const r = await admin.ok('imports', 'contracts', [fileRow], { sync: true });
+  assert.deepEqual([r.created, r.updated], [0, 1]);
+  const after = await admin.ok('contracts', 'get', id);
+  const engId = (await admin.ok('engineers', 'list')).find((e) => e.name === '맞춤기사').id;
+  assert.deepEqual([after.schedules[0].date, after.schedules[0].time, after.schedules[0].engineerId], ['2026-07-10', '09:00', engId], '①회차는 파일대로 (앞 표시 달라도 같은 기사)');
+  assert.equal(after.schedules[1].date, '2026-07-20', '파일에 없는 ②회차는 우리 입력 유지');
+  assert.deepEqual([after.status, after.completedDate], ['시공완료', '2026-07-10']);
+  assert.equal(after.payments.length, 1, '입금 그대로');
+  assert.ok(after.history.some((h) => /파일 일정 반영/.test(h.action)), '변경이력');
+  const again = await admin.ok('imports', 'contracts', [fileRow], { sync: true });
+  assert.deepEqual([again.updated, again.skipped], [0, 1], '바뀐 게 없으면 건너뜀');
+});
+
+test('계약 가져오기: 예전 번호가 당겨져도(예전 프로그램에서 계약 삭제) 계약일·구분·연락처·고객·현장으로 같은 계약을 찾고, 잘못 맞춰진 계약은 바로잡음', async () => {
+  await admin.ok('imports', 'engineers', [{ name: '청)번호기사' }, { name: '코)번호코팅' }]);
+  const common = { brand: '더좋은집', receptionType: '박람회', workType: '시공', contractDate: '2026-08-01', totalAmount: 300000, discount: 0, voucher: 0, payments: [] };
+  const clean = { ...common, legacyNo: '8801', category: '청소', customerName: '번호고객갑', customerPhone: '010-4848-1111', aptName: '번호아파트', dong: '107', ho: '404' };
+  const coat = { ...common, legacyNo: '8799', category: '나노코팅', customerName: '번호고객을', customerPhone: '010-4848-2222', aptName: '번호아파트', dong: '211', ho: '502' };
+  const none = [{ date: '', time: '', engineerName: '' }];
+  await admin.ok('imports', 'contracts', [{ ...clean, status: '미정', schedules: none }, { ...coat, status: '미정', schedules: none }]);
+  // 예전 프로그램에서 계약 2건이 지워져 번호가 당겨짐: 청소 8801 → 8799, 코팅 8799 → 8797
+  const file = [
+    { ...clean, legacyNo: '8799', status: '미정', schedules: [{ date: '2026-08-18', time: '', engineerName: '청)번호기사' }] },
+    { ...coat, legacyNo: '8797', status: '미정', schedules: [{ date: '2026-08-10', time: '14:00', engineerName: '코)번호코팅' }] },
+  ];
+  const r = await admin.ok('imports', 'contracts', file, { sync: true });
+  assert.deepEqual([r.created, r.updated], [0, 2], '번호가 달라도 새로 만들지 않고 각자 맞춤');
+  const list = await admin.ok('contracts', 'list', {});
+  const get = async (name) => admin.ok('contracts', 'get', list.find((x) => x.customerName === name).id);
+  const engs = await admin.ok('engineers', 'list');
+  const idOf = (n) => engs.find((e) => e.name === n).id;
+  let a = await get('번호고객갑');
+  assert.deepEqual([a.category, a.schedules[0].date, a.schedules[0].engineerId], ['청소', '2026-08-18', idOf('청)번호기사')], '청소 계약에는 청소 일정');
+  const b = await get('번호고객을');
+  assert.deepEqual([b.category, b.schedules[0].date, b.schedules[0].engineerId], ['나노코팅', '2026-08-10', idOf('코)번호코팅')], '코팅 계약에는 코팅 일정');
+  // 예전(번호로 찾던 때)에 잘못 들어간 일정·상태 흉내 → 같은 파일을 다시 올리면 파일대로 바로잡음
+  await admin.ok('contracts', 'update', a.id, { ...a, status: '취소', cancelReason: '잘못 맞춤', canceledDate: '2026-08-02', schedules: [{ ...a.schedules[0], engineerId: idOf('코)번호코팅'), date: '2026-08-10', time: '14:00' }, { date: '2026-08-10', time: '14:00', assignType: 'engineer', engineerId: idOf('코)번호코팅') }] });
+  // 예전 코드가 남긴 '파일로 일정 맞춤' 기록 (번호로 찾던 때) → 바로잡기 대상
+  const { getPool } = await import('../server/pg.js');
+  await getPool().query(`UPDATE contracts SET data = jsonb_set(data, '{history}', COALESCE(data->'history', '[]'::jsonb) || $2::jsonb) WHERE id = $1`, [a.id, JSON.stringify([{ at: new Date().toISOString(), action: '기존 프로그램 파일로 일정 맞춤 (예전 번호 8801)', changes: [] }])]);
+  const again = await admin.ok('imports', 'contracts', file, { sync: true });
+  assert.equal(again.created, 0);
+  a = await get('번호고객갑');
+  assert.deepEqual([a.status, a.schedules[0].date, a.schedules[0].time, a.schedules[0].engineerId], ['미정', '2026-08-18', '', idOf('청)번호기사')], '①회차·상태를 파일대로 바로잡음');
+  assert.deepEqual([a.schedules[1]?.date || '', a.schedules[1]?.engineerId || null], ['', null], '파일에 없는 ②회차의 잘못 들어간 일정은 비움');
+  assert.ok(a.history.some((h) => /일정 바로잡음/.test(h.action)), '변경이력');
+  // 바로잡은 뒤에는 다시 일반 맞추기 (바뀐 것 없으면 건너뜀)
+  const third = await admin.ok('imports', 'contracts', file, { sync: true });
+  assert.deepEqual([third.created, third.updated], [0, 0]);
+});
+
+test('계약 가져오기 중복 정리: 같은 계약이 파일보다 많으면 가져오기로만 생긴 나중 계약을 휴지통으로', async () => {
+  const { legacyKeys } = await import('../frontend/src/utils/legacyImport.js');
+  const { getPool } = await import('../server/pg.js');
+  const row = { legacyNo: '8901', brand: '더좋은집', category: '줄눈', receptionType: '박람회', workType: '시공', status: '미정', contractDate: '2026-08-05', customerName: '중복고객', customerPhone: '010-5959-1212', aptName: '중복아파트', dong: '1', ho: '1', totalAmount: 100000, discount: 0, voucher: 0, payments: [], schedules: [{ date: '', time: '', engineerName: '' }] };
+  await admin.ok('imports', 'contracts', [row]);
+  const orig = (await admin.ok('contracts', 'list', {})).find((x) => x.customerName === '중복고객');
+  // 예전에 번호로 찾다가 같은 계약이 한 번 더 들어간 상황 흉내 (DB 에 복사본)
+  await getPool().query(`INSERT INTO contracts (id, company_id, data) SELECT 990001, company_id, jsonb_set(data, '{id}', '990001') FROM contracts WHERE id = $1`, [orig.id]);
+  assert.equal((await admin.ok('contracts', 'list', {})).filter((x) => x.customerName === '중복고객').length, 2);
+  const r = await admin.ok('imports', 'contractDuplicates', { [legacyKeys(row)[0]]: 1 });
+  assert.equal(r.trashed, 1);
+  const left = (await admin.ok('contracts', 'list', {})).filter((x) => x.customerName === '중복고객');
+  assert.deepEqual(left.map((x) => x.id), [orig.id], '먼저 있던 계약은 남고 나중 복사본만 휴지통');
+  assert.equal((await admin.ok('imports', 'contractDuplicates', { [legacyKeys(row)[0]]: 1 })).trashed, 0, '다시 해도 그대로');
+});
+
+test('시공 시간 [무관]: 계약에 저장·표시, 예전 파일의 (무관)도 무관으로', async () => {
+  const { timeLabel, timeFieldsOf } = await import('../frontend/src/utils/contract.js');
+  const { parseLegacyHtml, mapLegacyRow } = await import('../frontend/src/utils/legacyImport.js');
+  assert.deepEqual(timeFieldsOf('ANY'), { time: '', ampm: 'ANY' });
+  assert.equal(timeLabel({ time: '', ampm: 'ANY' }), '무관');
+  const c = await admin.ok('contracts', 'create', { ...base, customerName: '무관고객', customerPhone: '010-6363-7474', category: '줄눈', schedules: [{ date: '2026-12-20', time: '', ampm: 'ANY', assignType: 'engineer' }] });
+  assert.equal((await admin.ok('contracts', 'get', c.id)).schedules[0].ampm, 'ANY');
+  // 예전 파일의 (무관)은 예전처럼 시간 없음, 직접 고른 무관은 파일대로 맞추기에도 그대로
+  const html = `<table><tbody><tr><td>9501</td><td>더좋은집</td><td>줄눈</td><td>박람</td><td>시공</td><td>미정</td><td>2026-05-01</td><td>무관파일(승인)</td><td>010-6363-8585</td><td>무관아파트101-101</td><td>84</td><td>0</td><td>할인금액 : 0</td><td>상품권 : 0</td><td>0</td><td>0</td><td>0</td><td>① : 2026-11-18(무관)</td><td>② : </td><td>미정</td><td>① : </td><td>② : </td><td></td><td></td><td></td><td></td></tr></tbody></table>`;
+  const [row] = parseLegacyHtml(html).map(mapLegacyRow);
+  assert.deepEqual([row.schedules[0].date, row.schedules[0].ampm || ''], ['2026-11-18', '']);
+  await admin.ok('imports', 'contracts', [row]);
+  const id = (await admin.ok('contracts', 'list', {})).find((x) => x.customerName === '무관파일').id;
+  const got = await admin.ok('contracts', 'get', id);
+  await admin.ok('contracts', 'update', id, { ...got, schedules: [{ ...got.schedules[0], ampm: 'ANY', time: '' }] });
+  await admin.ok('imports', 'contracts', [{ ...row, schedules: [{ ...row.schedules[0], date: '2026-11-19' }] }], { sync: true });
+  const after = await admin.ok('contracts', 'get', id);
+  assert.deepEqual([after.schedules[0].date, after.schedules[0].ampm], ['2026-11-19', 'ANY'], '날짜만 바뀌고 직접 고른 무관은 그대로');
 });

@@ -1,63 +1,60 @@
-// Vercel 서버 함수: 링크 미리보기용 페이지 (카카오톡·문자·SNS 가 링크를 읽을 때만 — vercel.json 의 rewrites)
-//   미리보기 프로그램은 화면 스크립트를 실행하지 않아 모든 링크가 같은 제목으로 보이므로,
-//   주소마다 다른 제목(예: "신화탄성 기사모바일 | VerityBase")을 담은 짧은 HTML 을 돌려줌
-//   사람이 여는 링크는 이 함수를 거치지 않고 원래 화면(index.html)으로 감
-import { getPool } from '../server/pg.js';
-import { APP_NAME, pageName, pageTitle } from '../frontend/src/utils/pageTitle.js';
+// Vercel 서버 함수: 업체 로그인 주소의 첫 화면 (실제 처리는 server/page.js)
+//   vercel.json 에서 /:업체, /:업체/(t|m|c), /:업체/c/:고유값 → /api/page?code=&kind=
+//   ?manifest=1 이면 그 주소의 홈 화면 앱 정보(manifest)
+import { readFile } from 'node:fs/promises';
+import path from 'node:path';
+import { handleRpc } from '../server/handler.js';
+import { injectMeta, manifestFor, pageMeta, validCode, validKind } from '../server/page.js';
 
-// 업체 코드가 아닌 첫 주소 단어 (frontend/src/router.js 의 PAGES 와 같음)
-const PAGES = ['c', 'e', 'm', 'contracts', 'customers', 'schedule', 'progress', 'stats', 'admin', 'settings', 'me', 'engineer', 'sign', 'api', 'assets'];
+let cachedHtml = null; // 같은 배포 동안 index.html 은 바뀌지 않음
 
-function split(pathname) {
-  const clean = pathname.replace(/\/+$/, '') || '/';
-  const [first, ...rest] = clean.split('/').filter(Boolean);
-  if (first && !PAGES.includes(first)) return { base: first.toLowerCase(), path: `/${rest.join('/')}` };
-  return { base: '', path: clean };
-}
-
-const esc = (s) => String(s).replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[ch]);
-
-async function companyName(code) {
-  if (!code || !process.env.DATABASE_URL) return '';
+async function companyName(code, host) {
+  if (!validCode(code)) return '';
   try {
-    const r = await getPool().query(`SELECT data->>'name' AS name FROM companies WHERE data->>'code' = $1 LIMIT 1`, [code]);
-    return r.rows[0]?.name || '';
+    const out = await handleRpc({ body: { service: 'companies', method: 'publicInfo', args: [code] }, headers: { host } });
+    return JSON.parse(out.body)?.result?.name || '';
   } catch {
-    return ''; // DB 가 안 되어도 미리보기는 기본 제목으로
+    return ''; // DB 가 잠깐 안 돼도 화면은 열리게 (이름만 기본값)
   }
 }
 
-function descriptionOf(route) {
-  const page = pageName(route.path);
-  if (page === '기사모바일') return '시공기사 전용 · 내 일정 확인과 완료 보고';
-  if (page === '고객 모바일') return '내 계약서와 시공 일정 확인';
-  if (page === '계약서 확인·서명') return '계약 내용을 확인하고 전자서명해 주세요.';
-  return '전자계약 · 시공일정 관리';
+// 빌드된 index.html: 함수에 함께 담긴 파일(vercel.json includeFiles) → 안 되면 같은 사이트에서 받아 옴
+async function indexHtml(req, host) {
+  if (cachedHtml) return cachedHtml;
+  try {
+    cachedHtml = await readFile(path.join(process.cwd(), 'frontend/dist/index.html'), 'utf8');
+  } catch {
+    const proto = req.headers['x-forwarded-proto'] || 'https';
+    const r = await fetch(`${proto}://${host}/index.html`, { headers: { cookie: req.headers.cookie || '' } }); // 미리보기 배포 보호 쿠키 전달
+    if (!r.ok) throw new Error(`index.html ${r.status}`);
+    cachedHtml = await r.text();
+  }
+  return cachedHtml;
 }
 
+// 그래도 실패하면: 브라우저가 index.html 을 직접 받아 그대로 띄움 (주소는 그대로라 화면이 정상으로 열림)
+const FALLBACK = '<!doctype html><meta charset="utf-8"><title>VerityBase</title><script>fetch("/index.html").then(function(r){return r.text()}).then(function(h){document.open();document.write(h);document.close()})</script>';
+
 export default async function handler(req, res) {
-  const url = new URL(req.url, 'http://localhost');
-  const pathname = url.searchParams.get('path') || url.pathname;
-  const route = split(pathname.startsWith('/') ? pathname : `/${pathname}`);
-  const title = pageTitle(route, await companyName(route.base));
-  const desc = descriptionOf(route);
-  const host = req.headers['x-forwarded-host'] || req.headers.host || '';
-  const link = `https://${host}${pathname}`;
+  const code = String(req.query.code || '').toLowerCase();
+  const kind = validKind(req.query.kind) ? String(req.query.kind || '') : '';
+  const host = req.headers['x-forwarded-host'] || req.headers.host;
+
+  if (req.query.manifest) {
+    const meta = pageMeta(code, kind, await companyName(code, host));
+    res.setHeader('Content-Type', 'application/manifest+json; charset=utf-8');
+    res.setHeader('Cache-Control', 'public, max-age=0, s-maxage=600');
+    res.status(200).send(JSON.stringify(manifestFor(meta)));
+    return;
+  }
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
-  res.setHeader('Cache-Control', 'public, max-age=300');
-  res.status(200).send(`<!DOCTYPE html>
-<html lang="ko">
-<head>
-<meta charset="UTF-8" />
-<title>${esc(title)}</title>
-<meta name="description" content="${esc(desc)}" />
-<meta property="og:type" content="website" />
-<meta property="og:site_name" content="${APP_NAME}" />
-<meta property="og:title" content="${esc(title)}" />
-<meta property="og:description" content="${esc(desc)}" />
-<meta property="og:url" content="${esc(link)}" />
-<meta property="og:image" content="https://${esc(host)}/icon-512.png" />
-</head>
-<body><a href="${esc(link)}">${esc(title)}</a></body>
-</html>`);
+  try {
+    const [html, name] = await Promise.all([indexHtml(req, host), companyName(code, host)]);
+    res.setHeader('Cache-Control', 'public, max-age=0, s-maxage=300'); // 5분 동안 같은 주소는 다시 만들지 않음 (배포하면 새로)
+    res.status(200).send(injectMeta(html, pageMeta(code, kind, name)));
+  } catch (e) {
+    console.error('[page]', e.message);
+    res.setHeader('Cache-Control', 'no-store');
+    res.status(200).send(FALLBACK);
+  }
 }

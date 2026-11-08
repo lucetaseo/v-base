@@ -52,12 +52,14 @@ export function splitSite(text) {
 
 const RECEPTION = { 박람: '박람회', 음성: '음성계약', 사전: '사전계약', 옵션: '옵션', 무상: '무상시공' };
 
-// "① : 2026-10-15(9:00)" → { date, time }
+// "① : 2026-10-15(9:00)" → { date, time } / "(오전)"·"(오후)" → ampm (시간 미정 오전·오후)
 function parseWhen(text) {
   const t = String(text || '').replace(/^[①②③]\s*:\s*/, '');
   const date = (t.match(/\d{4}-\d{2}-\d{2}/) || [''])[0];
   const tm = (t.match(/\((\d{1,2}):(\d{2})\)/) || []).slice(1);
-  return { date, time: tm.length ? `${tm[0].padStart(2, '0')}:${tm[1]}` : '' };
+  if (tm.length) return { date, time: `${tm[0].padStart(2, '0')}:${tm[1]}` };
+  const ampm = /\(\s*오전/.test(t) ? 'AM' : /\(\s*오후/.test(t) ? 'PM' : '';
+  return { date, time: '', ...(ampm ? { ampm } : {}) };
 }
 const who = (text) => String(text || '').replace(/^[①②③]\s*:\s*/, '').trim();
 
@@ -124,4 +126,15 @@ export function categoriesFromName(name) {
   const m = String(name || '').match(/^([가-힣,]+)\)/);
   if (!m) return [];
   return [...new Set(m[1].split(',').map((k) => PREFIX[k.trim()]).filter(Boolean))];
+}
+
+// 예전 계약 줄과 우리 계약이 같은 계약인지 찾는 열쇠 [정확히, 느슨하게]
+//   예전 '번호'는 목록 줄 번호라 예전 프로그램에서 계약을 지우면 당겨져서 쓰지 않음
+const looseText = (v) => String(v || '').replace(/\s+/g, '');
+export function legacyKeys(x) {
+  const phone = String(x.customerPhone || '').replace(/\D/g, '');
+  return [
+    [x.contractDate, x.category, phone, looseText(x.customerName), looseText(x.aptName), looseText(x.dong), looseText(x.ho)].join('|'),
+    [x.contractDate, x.category, phone].join('|'),
+  ];
 }

@@ -25,7 +25,7 @@ import { ROLES, DATA_SCOPES, permissionsOf, isOwnScopeOnly, ALL_PERMISSION_KEYS,
 import { digitsOnly, formatPhone } from '../utils/format.js';
 import { today } from '../utils/date.js';
 import { CATEGORIES, COMPANY_DOC_FIELDS, DEPARTMENTS, PURCHASE_CATEGORIES, brandTerms, termsSource } from '../constants.js';
-import { AUDIT_KEEP_DAYS, auditText } from './audit.js';
+import { AUDIT_KEEP_DAYS, auditText, skipAudit } from './audit.js';
 import {
   ApiError,
   authorize,
@@ -37,12 +37,12 @@ import {
   publicUser,
   session,
   validatePassword,
-  visibleContracts,
+  readableContracts,
 } from './core.js';
 
 export { ApiError } from './core.js';
 export { contracts, esign, notifications, reports, imports, customerApp } from './contracts.js';
-export { schedules, engineerOffs, engineerApp, scheduleSettings } from './schedule.js';
+export { schedules, engineerOffs, engineerApp, scheduleSettings, fairs } from './schedule.js';
 
 // ============================================================
 // 수정 로그 (설정 > 수정로그, 업체 관리자) — 최근 2주, 서버가 저장할 때 자동 기록
@@ -56,6 +56,7 @@ export const auditLogs = {
     const text = String(q || '').trim();
     const rows = (db.auditLogs || []).filter((r) => {
       if (r.at < since) return false;
+      if (skipAudit(r.call)) return false; // 지금은 남기지 않는 종류의 예전 기록 (고객 서명·상품·아파트 가져오기 등)
       const day = new Date(Date.parse(r.at) + 9 * 3600000).toISOString().slice(0, 10); // 한국 날짜
       if (from && day < from) return false;
       if (to && day > to) return false;
@@ -71,37 +72,18 @@ export const auditLogs = {
 // 인증   POST /api/auth/login, POST /api/auth/logout, GET /api/auth/me
 // ============================================================
 
-// 로그인 연속 실패 시 잠금 (무차별 대입 방지)
-const MAX_LOGIN_FAIL = 5;
-const LOCK_MINUTES = 10;
+// 비밀번호 확인 — 연속으로 틀려도 잠그지 않음 (업체 요청으로 로그인 잠김 기능 없앰)
 const LOGIN_FAIL_MSG = '아이디 또는 비밀번호가 올바르지 않습니다.';
 
-function assertNotLocked(rec) {
-  if (rec?.lockedUntil && rec.lockedUntil > nowIso()) {
-    const until = new Date(rec.lockedUntil).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
-    throw new ApiError(`비밀번호를 ${MAX_LOGIN_FAIL}회 잘못 입력해 ${until}까지 로그인이 잠겼습니다.`);
-  }
-}
-
 async function checkPassword(db, rec, password) {
-  assertNotLocked(rec);
-  if (await verifyPassword(password, rec.passwordHash)) {
-    rec.loginFailCount = 0;
-    rec.lockedUntil = null;
-    return;
-  }
-  rec.loginFailCount = (rec.loginFailCount || 0) + 1;
-  if (rec.loginFailCount >= MAX_LOGIN_FAIL) {
-    rec.lockedUntil = new Date(Date.now() + LOCK_MINUTES * 60000).toISOString();
-    rec.loginFailCount = 0;
-  }
-  saveDb(db); // 실패 횟수는 로그인 실패여도 저장
+  if (await verifyPassword(password, rec.passwordHash)) return;
   throw new ApiError(LOGIN_FAIL_MSG);
 }
 
 export const auth = {
   // companyCode: 업체 주소(veritybase.vercel.app/thegood)에서 로그인하면 그 업체 계정만 허용
   // kind: 'engineer' = 기사모바일(/업체주소/m) 로그인 → 기사 계정만
+  //       'manager'  = 상담실장(/업체주소/t) 로그인 → 직원 계정만
   //       그 외(일반 화면 /업체주소) → 직원 계정, 그 아이디의 직원이 없으면 기사 계정 (예전처럼 일반 화면에서 들어온 기사)
   async login(loginId, password, companyCode, kind) {
     const db = await loadDb();
@@ -111,6 +93,7 @@ export const auth = {
     if (code && !company) throw new ApiError('존재하지 않는 업체 주소입니다. 주소를 확인해 주세요.');
     const sameCompany = (rec) => !company || rec.companyId === company.id;
     const user = kind === 'engineer' ? null : db.users.find((u) => u.loginId === id && sameCompany(u));
+    if (!user && kind === 'manager') throw new ApiError(LOGIN_FAIL_MSG); // 상담실장 주소(/t)는 직원 계정만
     if (user) {
       await checkPassword(db, user, password);
       if (!user.active) throw new ApiError('사용이 중지된 계정입니다. 관리자에게 문의해 주세요.');
@@ -171,11 +154,11 @@ function normalizeCode(db, code, exceptId) {
 }
 
 export const companies = {
-  // 로그인 화면용 (로그인 전): 주소 코드로 업체 이름만 조회
+  // 로그인 화면용 (로그인 전): 주소 코드로 업체 이름 + 이용기간(언제까지 쓸 수 있는지) 조회
   async publicInfo(code) {
     const db = await loadDb();
     const c = db.companies.find((x) => x.code && x.code === String(code || '').toLowerCase());
-    return c ? { code: c.code, name: c.name, periodEnd: c.periodEnd || '' } : null; // periodEnd: 로그인 화면에 사용 가능 기한 표시
+    return c ? { code: c.code, name: c.name, periodStart: c.periodStart || '', periodEnd: c.periodEnd || '' } : null;
   },
 
   async list() {
@@ -558,6 +541,34 @@ export const apartments = {
     saveDb(db);
     return { created: names.length };
   },
+
+  // 아파트 일괄 등록 (예전 프로그램 아파트 목록: 시도, 시군구, 아파트명) — 업체 관리자만
+  //   같은 이름(띄어쓰기 무시)이 이미 있으면: 지역이 비어 있으면 지역만 채우고, 아니면 건너뜀
+  async importMany(rows = []) {
+    const { db, user } = await authorize('settings.manage');
+    if (user.role !== ROLES.ADMIN) throw new ApiError('데이터 가져오기는 업체 관리자만 할 수 있습니다.', 'FORBIDDEN');
+    const result = { created: 0, updated: 0, skipped: 0 };
+    const key = (n) => String(n || '').replace(/\s+/g, '');
+    for (const row of rows.slice(0, 500)) {
+      const name = String(row.name || '').trim();
+      if (!name) continue;
+      const sido = String(row.sido || '').trim();
+      const sigungu = String(row.sigungu || '').trim();
+      const same = db.apartments.filter((a) => a.companyId === user.companyId && key(a.name) === key(name));
+      const blank = same.find((a) => !a.sido && !a.sigungu);
+      if (same.some((a) => (a.sido || '') === sido && (a.sigungu || '') === sigungu)) result.skipped += 1;
+      else if (blank && (sido || sigungu)) {
+        Object.assign(blank, { sido, sigungu, updatedAt: nowIso() });
+        result.updated += 1;
+      } else if (same.length && !sido && !sigungu) result.skipped += 1;
+      else {
+        db.apartments.push({ id: nextId(db, 'apartments'), companyId: user.companyId, sido, sigungu, name, createdAt: nowIso() });
+        result.created += 1;
+      }
+    }
+    saveDb(db);
+    return result;
+  },
 };
 
 // ============================================================
@@ -751,7 +762,17 @@ export const customers = {
     const { db, user } = await authorize('customer.view');
     const q = query.trim();
     const qDigits = digitsOnly(q);
-    const visibleIds = new Set(visibleContracts(db, user).map((c) => c.customerId));
+    const visibleIds = new Set(readableContracts(db, user).map((c) => c.customerId));
+    // 계약자별 계약 수 + 가장 최근 계약 (주소·연락처②가 비어 있는 예전 계약자는 최근 계약의 현장·연락처로 채워 보여 줌)
+    const byCustomer = new Map();
+    db.contracts.forEach((x) => {
+      if (x.companyId !== user.companyId || x.deletedAt) return;
+      const e = byCustomer.get(x.customerId) || { count: 0, last: null };
+      e.count += 1;
+      if (!e.last || x.id > e.last.id) e.last = x;
+      byCustomer.set(x.customerId, e);
+    });
+    const siteOf = (x) => (x?.aptName ? [x.aptName, x.dong && `${x.dong}동`, x.ho && `${x.ho}호`].filter(Boolean).join(' ') : '');
     return db.customers
       .filter((c) => c.companyId === user.companyId)
       // 본인 건만 보는 실장은 본인 계약에 연결된 계약자만
@@ -763,10 +784,15 @@ export const customers = {
           (qDigits && (digitsOnly(c.phone1).includes(qDigits) || digitsOnly(c.phone2).includes(qDigits))),
       )
       .sort((a, b) => b.id - a.id)
-      .map((c) => ({
-        ...clone(c),
-        contractCount: db.contracts.filter((x) => x.customerId === c.id && !x.deletedAt).length,
-      }));
+      .map((c) => {
+        const e = byCustomer.get(c.id);
+        return {
+          ...clone(c),
+          address1: c.address1 || siteOf(e?.last),
+          phone2: c.phone2 || (e?.last?.customerPhone2 && digitsOnly(e.last.customerPhone2) !== digitsOnly(c.phone1) ? e.last.customerPhone2 : ''),
+          contractCount: e?.count || 0,
+        };
+      });
   },
 
   async findByPhone(phone) {

@@ -4,7 +4,8 @@ import { formatAddress, won } from '../utils/format.js';
 import { MOLD_PRICE, MOLD_ROOMS, PAINT_PLACES, PAINT_STYLE_CATEGORIES, REVIEW_PAYBACK, contractTermsFor, isMoldLine, moldLineName, termSection } from '../constants.js';
 
 // 계약 조건: 서명한 계약서는 서명 당시 조건, 아니면 업체·브랜드별 조건
-const termsOf = (esign, company, brand, categories) => (esign?.status === '서명완료' && esign.terms?.length ? esign.terms : contractTermsFor(company, brand, categories));
+const termsOf = (esign, company, brand, categories) =>
+  (esign?.status === '서명완료' && esign.terms?.length ? esign.terms : contractTermsFor(company, brand, categories) || []).filter((t) => t !== null && t !== undefined).map(String);
 
 
 
@@ -171,7 +172,7 @@ function Part({ c, multi, amountOn, site }) {
       <tr>
         <th>{label('시공 일정')}</th>
         <td colSpan={3}>
-          {c.schedules.map((s, i) => (
+          {(c.schedules || []).map((s, i) => (
             <div key={i}>
               {i + 1}차: {s.date ? `${s.date} ${timeLabel(s)}` : '협의 후 확정'}
             </div>

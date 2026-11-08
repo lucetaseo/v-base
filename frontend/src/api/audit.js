@@ -6,11 +6,28 @@
 
 export const AUDIT_KEEP_DAYS = 14;
 
+// 수정로그에 남기지 않는 호출 — 시연 데이터, 고객 서명, 상품 등록·수정·삭제·가져오기, 아파트 가져오기
+//   서버는 이 호출을 기록하지 않고, 목록에서도 예전에 남은 같은 기록을 숨김
+const NO_AUDIT = new Set([
+  'contracts.sampleAdd',
+  'contracts.sampleClear',
+  'esign.sign',
+  'imports.products',
+  'apartments.importMany',
+  'apartments.fromContracts',
+  'contracts.repairCustomerLinks', // 계약자 연결 자동 정리 (사람이 한 수정이 아님)
+]);
+const NO_AUDIT_SERVICES = new Set(['products']);
+export const skipAudit = (name) => NO_AUDIT.has(name) || NO_AUDIT_SERVICES.has(String(name || '').split('.')[0]);
+
 // 요청 이름 → 작업 이름 (없으면 '저장')
 const ACTIONS = {
   'contracts.create': '계약 등록',
+  'fairs.save': '박람회 일정 저장',
+  'fairs.remove': '박람회 일정 삭제',
   'contracts.update': '계약 수정',
   'contracts.moveToTrash': '휴지통으로 이동',
+  'contracts.setAs': 'AS관리 이동',
   'contracts.restore': '휴지통에서 복구',
   'contracts.purge': '계약 완전 삭제',
   'contracts.addPayment': '입금 등록',
@@ -19,7 +36,6 @@ const ACTIONS = {
   'contracts.paymentPhotos': '영수증 사진',
   'contracts.setPaperPhotos': '실물 계약서 사진',
   'contracts.setDiscount': '할인 적용',
-  'contracts.setApproval': '계약 승인',
   'contracts.requestSign': '서명 요청',
   'contracts.addNote': '상담내역 등록',
   'contracts.updateSchedule': '시공일정·기사 배정',
@@ -52,10 +68,12 @@ const ACTIONS = {
   'stocks.removeItem': '재고 품목 삭제',
   'stocks.addMove': '재고 입고·사용·실사',
   'stocks.removeMove': '재고 기록 삭제',
+  'apartments.importMany': '아파트 가져오기',
   'scheduleSettings.save': '일정관리설정 저장',
   'imports.engineers': '기사 가져오기',
   'imports.contracts': '계약 가져오기',
   'imports.users': '직원 계정 가져오기',
+  'imports.products': '상품 가져오기',
   'notifications.send': '알림톡 발송',
 };
 
@@ -73,7 +91,7 @@ const TABLES = {
   purchases: (r) => `매입 ${r.date || ''} ${r.item || ''}`.trim(),
   companies: (r) => `업체 설정 ${r.name || ''}`,
   notifications: (r) => `알림톡 ${r.template || ''} → ${r.receiverName || ''}`,
-  paymentReceipts: (r) => (r.kind === 'contractPaper' ? '실물 계약서 사진' : '입금 영수증 사진'),
+  paymentReceipts: (r) => (r.kind === 'contractPaper' ? '실물 계약서 사진' : r.kind === 'asPhoto' ? 'AS 사진' : '입금 영수증 사진'),
 };
 
 // 항목 이름 (없는 항목은 영문 이름 그대로)
@@ -108,6 +126,9 @@ const FIELDS = {
   engineerNote: '기사 메모',
   esign: '전자서명',
   deletedAt: '삭제(휴지통)',
+  asAt: 'AS관리',
+  asInfo: 'AS 접수',
+  asLogs: 'AS 이력',
   taxInvoice: '세금계산서',
   cashReceipt: '현금영수증',
   receptionType: '접수형태',

@@ -80,9 +80,10 @@ export async function loadSnapshot(client, scope) {
   for (const key of COMPANY_SCOPED) {
     if (key === 'paymentReceipts' && scope.companyId && scope.receiptsFor) {
       db[key] = (
-        await rows(client, `SELECT data FROM payment_receipts WHERE company_id = $1 AND data->>'contractId' = $2 ORDER BY id`, [
+        // receiptsFor: 계약 번호 하나, 또는 여러 건(AS 접수 등 목록에서 고른 계약들)
+        await rows(client, `SELECT data FROM payment_receipts WHERE company_id = $1 AND data->>'contractId' = ANY($2::text[]) ORDER BY id`, [
           scope.companyId,
-          String(Number(scope.receiptsFor)),
+          [].concat(scope.receiptsFor).map((x) => String(Number(x))),
         ])
       ).map(toObj);
     } else if (scope.companyId && wanted.includes(key)) {
@@ -112,8 +113,9 @@ export async function loadSnapshot(client, scope) {
       )
     ).map((r) => ({ ownerId: r.owner, count: Number(r.n), maxUpd: r.upd || '', idSum: Number(r.ids) }));
   }
-  if (scope.signatureFor && db.contracts.length) {
-    const id = Number(scope.signatureFor);
+  const sigId = Number(scope.signatureFor);
+  if (Number.isSafeInteger(sigId) && sigId > 0 && db.contracts.length) {
+    const id = sigId; // 숫자가 아닌 번호가 오면 DB 오류(500) 대신 서명 없이 진행 → 업무 코드가 '계약을 찾을 수 없습니다'로 안내
     const sig = await rows(client, `SELECT image FROM contract_signatures WHERE contract_id = $1 AND company_id = $2`, [id, scope.companyId]);
     const c = db.contracts.find((x) => x.id === id);
     if (sig[0] && c?.esign) c.esign.signature = sig[0].image;
@@ -240,7 +242,12 @@ export async function companyIdForCustomer(client, name, args, session) {
     return r[0] ? Number(r[0].id) : null;
   }
   if (name === 'customerApp.linkLogin') {
-    const r = await rows(client, `SELECT company_id FROM contracts WHERE data->>'customerToken' = $1`, [String(args[0] || '')]);
+    // 고객확인페이지 값 또는 서명 링크 값(지금·예전) — services.js customerApp.linkLogin 과 같게
+    const r = await rows(
+      client,
+      `SELECT company_id FROM contracts WHERE data->>'customerToken' = $1 OR data->'esign'->>'token' = $1 OR (data->'esign'->'pastTokens') ? $1 LIMIT 1`,
+      [String(args[0] || '')],
+    );
     return r[0] ? Number(r[0].company_id) : null;
   }
   return session?.customer?.companyId ? Number(session.customer.companyId) : null;
@@ -248,6 +255,11 @@ export async function companyIdForCustomer(client, name, args, session) {
 
 // 서명 링크 → { companyId, contractId } (없으면 null 들)
 export async function contractByEsignToken(client, token) {
-  const r = await rows(client, `SELECT id, company_id FROM contracts WHERE data->'esign'->>'token' = $1 ORDER BY id`, [String(token || '')]);
+  // 지금 서명 링크 값 → 예전 서명 링크 값 → 고객확인페이지 값 순으로 (contracts.js bundleByToken 과 같게)
+  const t = String(token || '');
+  let r = await rows(client, `SELECT id, company_id FROM contracts WHERE data->'esign'->>'token' = $1 ORDER BY id LIMIT 1`, [t]);
+  if (!r[0] && t) {
+    r = await rows(client, `SELECT id, company_id FROM contracts WHERE (data->'esign'->'pastTokens') ? $1 OR data->>'customerToken' = $1 ORDER BY id LIMIT 1`, [t]);
+  }
   return r[0] ? { companyId: Number(r[0].company_id), contractId: Number(r[0].id) } : { companyId: null, contractId: null };
 }
