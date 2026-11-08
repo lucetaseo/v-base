@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   contracts as contractApi,
   engineerOffs as offApi,
+  fairs as fairApi,
   engineers as engineerApi,
   schedules as scheduleApi,
   teams as teamApi,
@@ -13,8 +14,10 @@ import { WEEKDAYS, formatKoreanDate, toDateKey, today } from '../utils/date.js';
 import { formatAddress, won } from '../utils/format.js';
 import { downloadExcel } from '../utils/excel.js';
 import KakaoModal from './KakaoModal.jsx';
+import WorkRecord from './WorkRecord.jsx';
 import ContractViewModal from './ContractViewModal.jsx';
 import OffModal from './OffModal.jsx';
+import FairModal from './FairModal.jsx';
 import { backdrop } from '../utils/backdrop.js';
 import { navigateForward } from '../router.js';
 import { useRefreshOnReturn } from '../utils/useRefreshOnReturn.js';
@@ -24,6 +27,8 @@ const short = (category) => (CATEGORY_SHORT[category] ? `${CATEGORY_SHORT[catego
 // 이름 앞에 이미 "줄)"·"탄,줄)" 같은 표시가 있으면 구분 표시를 또 붙이지 않음 ("줄)줄)공두환" 방지)
 const HAS_PREFIX = /^[가-힣,]+\)/;
 const withShort = (category, name) => (HAS_PREFIX.test(name || '') ? name : `${short(category)}${name}`);
+
+const FAIR_ONLY = '__fair'; // 첫 칸 '박람회' (박람회 일정만 보기)
 
 export default function ScheduleManagement() {
   const { company, can, handleError } = useAuth();
@@ -38,6 +43,8 @@ export default function ScheduleManagement() {
   const [selectedDate, setSelectedDate] = useState(saved?.selectedDate || null);
   const [items, setItems] = useState([]);
   const [offs, setOffs] = useState([]);
+  const [fairList, setFairList] = useState([]); // 박람회 일정 (달력에 초록색)
+  const [fairEdit, setFairEdit] = useState(null); // { fair } 또는 { date } — 박람회 팝업
   const [engineers, setEngineers] = useState([]);
   const [crewTeams, setCrewTeams] = useState([]);
   const [filter, setFilter] = useState({ category: '', engineerId: '', status: '', view: '' });
@@ -53,12 +60,15 @@ export default function ScheduleManagement() {
   const load = useCallback(async () => {
     try {
       const { view, ...query } = filter;
-      const [sch, off] = await Promise.all([
+      if (query.category === FAIR_ONLY) query.category = ''; // 박람회만 보기: 시공 일정은 거르지 않고 화면에서 숨김
+      const [sch, off, fr] = await Promise.all([
         scheduleApi.list({ from: monthStart, to: monthEnd, ...query }),
         offApi.list({ from: monthStart, to: monthEnd, engineerId: filter.engineerId === 'none' ? '' : filter.engineerId }),
+        fairApi.list({ from: monthStart, to: monthEnd }).catch(() => []),
       ]);
       setItems(sch);
       setOffs(off);
+      setFairList(fr);
     } catch (e) {
       handleError(e);
     }
@@ -68,6 +78,11 @@ export default function ScheduleManagement() {
     load();
   }, [load]);
   useRefreshOnReturn(load); // 기사가 휴대폰에서 등록한 휴무도 다시 보면 반영
+  // 위쪽 [박람회 일정 등록]으로 저장하면 달력도 바로 다시 불러옴
+  useEffect(() => {
+    window.addEventListener('vb:fairs-changed', load);
+    return () => window.removeEventListener('vb:fairs-changed', load);
+  }, [load]);
 
   useEffect(() => {
     engineerApi.list().then(setEngineers).catch(() => {});
@@ -87,8 +102,11 @@ export default function ScheduleManagement() {
     setSelectedDate(today());
   };
 
-  const showWork = filter.view !== 'off';
-  const showOff = filter.view !== 'work';
+  // 첫 칸(전체·줄눈·청소…)에서 '박람회'를 고르면 박람회만 / 셋째 칸(구분)에서 시공·휴무를 고르면 박람회는 숨김
+  const fairOnly = filter.category === FAIR_ONLY;
+  const showWork = !fairOnly && filter.view !== 'off';
+  const showOff = !fairOnly && filter.view !== 'work';
+  const showFair = !filter.view && (fairOnly || !filter.category);
 
   const byDate = useMemo(() => {
     const map = {};
@@ -105,6 +123,10 @@ export default function ScheduleManagement() {
     });
     return map;
   }, [offs]);
+
+  // 박람회: 날짜별 (여러 날 박람회는 그 기간 모든 날짜에)
+  const fairPeople = (f) => [...(f.engineers || []).map((e) => e.name), ...f.staff.map((s) => s.name)]; // 기사 (예전 박람회는 실장도)
+  const fairsOn = (dateKey) => (showFair ? fairList : []).filter((f) => f.date <= dateKey && (f.endDate || f.date) >= dateKey);
 
   // 날짜 칸에 "줄)공두환 : 2건" 형태로 담당별 건수 표시
   const cellSummary = (list) => {
@@ -227,7 +249,7 @@ export default function ScheduleManagement() {
           연락처: it.contract.customerPhone,
           현장: formatAddress(it.contract),
           모바일웹: it.mobileStatus || '입력 전',
-          ...(showAmount ? { 잔액: calcAmounts(it.contract).balance } : {}),
+          ...(showAmount ? { 잔액: it.contract.amountHidden ? '' : calcAmounts(it.contract).balance } : {}),
           메모: it.memo,
         })),
         ...dayOffs.map((o) => ({ 날짜: o.date, 시간: OFF_LABEL[o.period], 구분: '휴무', 담당: o.engineerName, 메모: o.reason })),
@@ -259,6 +281,7 @@ export default function ScheduleManagement() {
         <select className="schedule-select" value={filter.category} onChange={(e) => setFilter({ ...filter, category: e.target.value })}>
           <option value="">전체</option>
           {CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
+          <option value={FAIR_ONLY}>박람회</option>
         </select>
         <select className="schedule-select" value={filter.engineerId} onChange={(e) => setFilter({ ...filter, engineerId: e.target.value })}>
           <option value="">기사선택</option>
@@ -275,7 +298,7 @@ export default function ScheduleManagement() {
           {WORK_STATUS.map((s) => <option key={s} value={s}>{s}</option>)}
         </select>
         <span className="sub-text" style={{ alignSelf: 'center' }}>
-          이번 달 일정 {items.length}건 · 휴무 {offs.length}건
+          이번 달 일정 {items.length}건 · 휴무 {offs.length}건{fairList.length > 0 && ` · 박람회 ${fairList.length}건`}
         </span>
       </div>
 
@@ -310,9 +333,24 @@ export default function ScheduleManagement() {
                     onClick={() => setSelectedDate(dateKey)}
                   >
                     <div className={`day-number ${dow === 0 ? 'sunday' : ''} ${dow === 6 ? 'saturday' : ''}`}>
-                      {Number(dateKey.slice(8))}
+                      {dateKey === today() ? (
+                        <span>
+                          <span className="today-num">{Number(dateKey.slice(8))}</span>
+                          <span className="today-label">오늘</span>
+                        </span>
+                      ) : (
+                        Number(dateKey.slice(8))
+                      )}
                       {list.length > 0 && <span className="day-total">{list.length}건</span>}
                     </div>
+                    {fairsOn(dateKey).map((f) => (
+                      <div key={`fair${f.id}`} className="fair-box" title={`박람회: ${f.label}\n${fairPeople(f).join(', ')}`}>
+                        <span className="fair-box-title">박람회</span>
+                        {fairPeople(f).map((n, i) => (
+                          <span key={i} className="fair-name">{n}</span>
+                        ))}
+                      </div>
+                    ))}
                     {offList.length > 0 && (
                       <div className="off-box" title={offList.map((o) => `${o.engineerName} ${OFF_LABEL[o.period]}휴무: ${o.reason}`).join('\n')}>
                         <div className="off-box-title">휴무</div>
@@ -325,12 +363,12 @@ export default function ScheduleManagement() {
                       </div>
                     )}
                     <div className="schedule-tag-list">
-                      {summary.slice(0, 6).map(([k, n]) => (
+                      {/* 예전 프로그램처럼 그날 기사별 건수를 모두 표시 (기사 배정 안 된 일정은 '미정') */}
+                      {summary.map(([k, n]) => (
                         <div key={k} className={`schedule-badge ${k === '미배정' ? 'unassigned' : ''}`}>
-                          {k} : {n}건
+                          {k === '미배정' ? '미정' : k} : {n}건
                         </div>
                       ))}
-                      {summary.length > 6 && <div className="schedule-badge more">…</div>}
                     </div>
                   </div>
                 );
@@ -354,6 +392,11 @@ export default function ScheduleManagement() {
                     + 휴무 등록
                   </button>
                 )}
+                {can('fair.manage') && (
+                  <button type="button" className="btn-excel-download fair-add" onClick={() => setFairEdit({ date: selectedDate })}>
+                    + 박람회
+                  </button>
+                )}
                 {can('excel.export') && (
                   <button type="button" className="btn-excel-download" onClick={exportDay}>엑셀 다운로드</button>
                 )}
@@ -361,6 +404,23 @@ export default function ScheduleManagement() {
               </div>
             </div>
 
+            {selectedDate && fairsOn(selectedDate).length > 0 && (
+              <div className="day-fair-list">
+                {fairsOn(selectedDate).map((f) => (
+                  <div key={f.id} className="day-fair-row">
+                    <span className="fair-chip">박람회</span>
+                    <strong className="fair-names">{fairPeople(f).join(', ')}</strong>
+                    <span>{f.label}</span>
+                    {f.endDate && <span className="sub-text">({f.date} ~ {f.endDate})</span>}
+                    {can('fair.manage') && (
+                      <button type="button" className="btn-link" onClick={() => setFairEdit({ fair: f })}>
+                        수정/삭제
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
             {dayOffs.length > 0 && (
               <div className="day-off-list">
                 {dayOffs.map((o) => (
@@ -386,7 +446,6 @@ export default function ScheduleManagement() {
                   <tr>
                     <th>구분</th>
                     <th>시공자</th>
-                    <th>회차</th>
                     <th>시간</th>
                     <th>계약자</th>
                     <th>아파트/동호수</th>
@@ -399,7 +458,7 @@ export default function ScheduleManagement() {
                 <tbody>
                   {details.length === 0 ? (
                     <tr>
-                      <td colSpan={showAmount ? 10 : 9} className="no-data">
+                      <td colSpan={showAmount ? 9 : 8} className="no-data">
                         {selectedDate} 일자에 배정된 시공 일정이 없습니다.
                       </td>
                     </tr>
@@ -438,7 +497,6 @@ export default function ScheduleManagement() {
                             row.assigneeName || <span className="text-red">미배정</span>
                           )}
                         </td>
-                        <td>{row.stepIndex + 1}차</td>
                         <td>{timeLabel(row) || '-'}</td>
                         <td>
                           {row.contract.customerName}
@@ -448,17 +506,21 @@ export default function ScheduleManagement() {
                           {formatAddress(row.contract)}
                           {row.memo && <div className="sub-text">메모: {row.memo}</div>}
                         </td>
-                        <td>{row.mobileStatus || <span className="sub-text">입력 전</span>}</td>
+                        <td>
+                          {row.mobileStatus || <span className="sub-text">입력 전</span>}
+                          {row.mobileMemo && <div className="sub-text">“{row.mobileMemo}”</div>}
+                          <WorkRecord record={row.workRecord} onMore={() => navigateForward(`/contracts/${row.contract.id}?tab=${encodeURIComponent('시공관리')}&focus=progress`)} />
+                        </td>
                         <td>{row.contract.status}</td>
-                        {showAmount && <td className="text-right">{won(calcAmounts(row.contract).balance)}</td>}
+                        {showAmount && <td className="text-right">{row.contract.amountHidden ? '-' : won(calcAmounts(row.contract).balance)}</td>}
                         <td>
                           <div className="row-actions">
-                            {can('notify.send') && (
+                            {(
                               <button type="button" className="btn-talk-yellow" title="담당기사 알림톡" onClick={() => setNotifyItem(row)}>
                                 💬
                               </button>
                             )}
-                            {(canEditContract || canEdit) && (
+                            {(canEditContract || canEdit) && !row.contract.readOnly && (
                               <button
                                 type="button"
                                 className="btn-dark-action"
@@ -507,6 +569,7 @@ export default function ScheduleManagement() {
                       <input type="date" value={editItem.date} onChange={(e) => setEditItem({ ...editItem, date: e.target.value })} className="input-text" required />
                       <select className="input-text" value={timeValueOf(editItem)} onChange={(e) => setEditItem({ ...editItem, ...timeFieldsOf(e.target.value) })}>
                         <option value="">시간미정</option>
+                        <option value="ANY">무관</option>
                         <option value="AM">오전(시간미정)</option>
                         <option value="PM">오후(시간미정)</option>
                         {timeOptions(settings).map((t) => <option key={t} value={t}>{t}</option>)}
@@ -592,6 +655,7 @@ export default function ScheduleManagement() {
         <KakaoModal contract={notifyItem.contract} initialTarget="기사" initialStep={notifyItem.stepIndex} onClose={() => setNotifyItem(null)} />
       )}
       {viewId && <ContractViewModal contractId={viewId} onClose={() => setViewId(null)} onChanged={load} />}
+      {fairEdit && <FairModal fair={fairEdit.fair || null} initialDate={fairEdit.date} onSaved={load} onClose={() => setFairEdit(null)} />}
     </div>
   );
 }

@@ -7,8 +7,10 @@
 //   /{업체}              업체 로그인        /{업체}/contracts/12       계약 상세
 //   /{업체}/contracts     계약 목록          /{업체}/contracts/12/edit  계약 수정
 //   /{업체}/contracts/new 계약 등록          /{업체}/contracts/new?from=12  같은 현장 시공 추가
+//   /{업체}/consult      상담홈 (/t 상담실장으로 로그인했을 때 첫 화면)
 //   /{업체}/customers  /schedule  /progress  /stats  /settings/...  /me
 //   /{업체}/m  /{업체}/m/off  /{업체}/m/contract/12   (기사모바일, 예전 /engineer 주소도 넘겨줌)
+//   /{업체}/t                         (상담실장 로그인 — 직원 계정만, 로그인 뒤 화면은 일반화면과 같음)
 //   /{업체}/c  /{업체}/c/:고유값      (고객모바일 — 이름+휴대폰 / 알림톡 링크로 바로 로그인)
 //   /                    운영자 로그인      /admin  (운영자 업체 관리)
 //   /sign/:token         고객 전자서명 (로그인 불필요, 업체 코드 없음)
@@ -20,7 +22,7 @@ import { useEffect, useState } from 'react';
 const EVENT = 'uffice:navigate';
 
 // 업체 코드가 아닌 첫 주소 단어 (화면 이름)
-const PAGES = ['c', 'e', 'm', 'contracts', 'customers', 'schedule', 'progress', 'stats', 'admin', 'settings', 'me', 'engineer', 'sign', 'api', 'assets'];
+const PAGES = ['c', 'e', 'm', 't', 'consult', 'contracts', 'customers', 'schedule', 'progress', 'stats', 'admin', 'settings', 'me', 'engineer', 'sign', 'api', 'assets'];
 
 function split(pathname) {
   const clean = pathname.replace(/\/+$/, '') || '/';
@@ -42,12 +44,51 @@ export function withBase(to, base = split(window.location.pathname).base) {
   return `/${base}${target.pathname === '/' ? '' : target.pathname}${target.search}`;
 }
 
+// 작성 중인 화면 지키기: 저장 안 한 내용이 있으면 다른 화면으로 가기 전에 한 번 물어봄
+//   (휴대폰·브라우저 뒤로가기, 메뉴·로고 누르기, 새로고침·창 닫기)
+//   setLeaveGuard(() => 묻는 글 | null) → 해제 함수. 저장·취소 버튼으로 나갈 때는 먼저 해제하고 나감
+let leaveGuard = null;
+export function setLeaveGuard(fn) {
+  leaveGuard = fn;
+  return () => {
+    if (leaveGuard === fn) leaveGuard = null;
+  };
+}
+const leaveMessage = () => (leaveGuard ? leaveGuard() : null);
+// 나가도 되면 true (묻는 글이 없거나, 물어봐서 [확인])
+const confirmLeave = () => {
+  const msg = leaveMessage();
+  return !msg || window.confirm(msg);
+};
+let skipPop = false; // [취소]해서 제자리로 돌아올 때 생기는 이동은 무시
+window.addEventListener('popstate', (e) => {
+  if (skipPop) {
+    skipPop = false;
+    e.stopImmediatePropagation();
+    return;
+  }
+  if (confirmLeave()) {
+    leaveGuard = null; // 나가기로 했으면 더 묻지 않음
+    return;
+  }
+  e.stopImmediatePropagation(); // 화면은 그대로 두고
+  skipPop = true;
+  window.history.go(1); // 주소도 원래대로 (뒤로 간 기록을 다시 앞으로)
+});
+window.addEventListener('beforeunload', (e) => {
+  if (!leaveMessage()) return;
+  e.preventDefault();
+  e.returnValue = ''; // 브라우저 기본 '사이트에서 나가시겠습니까?' 창
+});
+
 // options.replace: 현재 기록을 바꿈(뒤로가기 대상이 되지 않음), options.state: 기록에 함께 저장할 값
 // options.base: 업체 코드를 바꿔서 이동 (로그인 직후 자기 업체 주소로), ''이면 업체 코드 없이
 export function navigate(to, { replace = false, state = {}, base } = {}) {
   const target = new URL(base === undefined ? withBase(to) : withBase(to, base), window.location.origin);
   const same = target.pathname + target.search === window.location.pathname + window.location.search;
   if (same && !replace) return;
+  if (!same && !confirmLeave()) return;
+  if (!same) leaveGuard = null;
   window.history[replace ? 'replaceState' : 'pushState'](state, '', target.pathname + target.search);
   window.dispatchEvent(new Event(EVENT));
   if (!replace) window.scrollTo(0, 0);

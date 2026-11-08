@@ -1,10 +1,13 @@
-import React from 'react';
+import React, { useState } from 'react';
 import PaperChip from './PaperChip.jsx';
 import { calcAmounts, itemsSummary, kindBreakdown, timeLabel } from '../utils/contract.js';
 import { formatAddress, won } from '../utils/format.js';
 import { ESIGN_STATUS } from '../constants.js';
 
 const CIRCLED = ['①', '②', '③'];
+
+// AS 최근 회차 (AS관리 목록 표시)
+const asLast = (c) => c.asLogs?.at(-1) || c.asInfo || null;
 
 const STATUS_CLASS = {
   미정: 'st-gray',
@@ -15,7 +18,6 @@ const STATUS_CLASS = {
   취소: 'st-red',
 };
 
-const APPROVAL_CLASS = { 승인: 'ap-ok', 승인대기: 'ap-wait', 미승인: 'ap-no' };
 
 const ESIGN_CLASS = {
   [ESIGN_STATUS.NONE]: 'es-none',
@@ -23,8 +25,57 @@ const ESIGN_CLASS = {
   [ESIGN_STATUS.SIGNED]: 'es-done',
 };
 
+// 휴대폰 목록 보기: 'full' 자세히(카드에 모든 항목) / 'compact' 간단히(이름·아파트·계약금액 한 줄) — 기기에 기억
+const VIEW_KEY = 'uffice.mobileListView';
+const savedView = () => {
+  try {
+    return localStorage.getItem(VIEW_KEY) === 'compact' ? 'compact' : 'full';
+  } catch {
+    return 'full';
+  }
+};
+
 // onOpen 이 있으면 줄에 마우스를 올렸을 때 강조되고, 누르면 계약 상세로 이동
-export default function ContractTable({ contracts, selectedIds, onToggle, onToggleAll, showAmount, renderActions, onOpen }) {
+export default function ContractTable(props) {
+  const [view, setViewState] = useState(savedView);
+  const setView = (v) => {
+    setViewState(v);
+    try {
+      localStorage.setItem(VIEW_KEY, v);
+    } catch {
+      // 저장 안 되는 브라우저면 이번에만 적용
+    }
+  };
+  const { contracts, showAmount, onOpen } = props;
+  return (
+    <div className={`contract-list-wrap view-${view}`}>
+      {/* 휴대폰에서만 보이는 보기 전환 */}
+      <div className="mobile-view-toggle">
+        <span>목록 보기</span>
+        <button type="button" className={view === 'full' ? 'on' : ''} onClick={() => setView('full')}>
+          자세히
+        </button>
+        <button type="button" className={view === 'compact' ? 'on' : ''} onClick={() => setView('compact')}>
+          간단히
+        </button>
+      </div>
+      {/* 간단히: 이름 · 아파트 · 계약금액 한 줄 (휴대폰에서만) */}
+      <div className="contract-compact-list">
+        {contracts.length === 0 && <p className="no-data">조건에 맞는 계약이 없습니다.</p>}
+        {contracts.map((item) => (
+          <button key={item.id} type="button" className="cc-row" onClick={onOpen ? () => onOpen(item) : undefined}>
+            <span className="cc-name">{item.customerName}</span>
+            <span className="cc-site">{formatAddress(item)}</span>
+            {showAmount && !item.amountHidden && <span className="cc-amount">{won(calcAmounts(item).actual)}원</span>}
+          </button>
+        ))}
+      </div>
+      <FullTable {...props} />
+    </div>
+  );
+}
+
+function FullTable({ contracts, selectedIds, onToggle, onToggleAll, showAmount, renderActions, onOpen }) {
   const allChecked = contracts.length > 0 && contracts.every((c) => selectedIds.has(c.id));
   const colCount = showAmount ? 13 : 11;
 
@@ -101,8 +152,7 @@ export default function ContractTable({ contracts, selectedIds, onToggle, onTogg
                 </td>
                 <td data-label="계약자" className="nowrap">
                   <div className="bold-text">
-                    {item.customerName}{' '}
-                    <span className={`approval ${APPROVAL_CLASS[item.approval] || ''}`}>({item.approval})</span>
+                    {item.customerName}
                   </div>
                   <div className="sub-text">{item.customerPhone}</div>
                   <span className={`esign-chip ${ESIGN_CLASS[item.esign?.status] || ''}`}>{item.esign?.status}</span>
@@ -110,12 +160,25 @@ export default function ContractTable({ contracts, selectedIds, onToggle, onTogg
                 </td>
                 <td data-label="아파트명" className="text-left apt-cell">
                   <div>{formatAddress(item)}</div>
+                  {asLast(item) && (
+                    <div className="as-request">
+                      🔧 AS{item.asLogs?.length > 1 ? ` ${item.asLogs.length}회` : ''} {asLast(item).date} · {asLast(item).request}{asLast(item).photoCount > 0 && ` 📷${asLast(item).photoCount}`}
+                      {asLast(item).doneAt && <b> (완료)</b>}
+                    </div>
+                  )}
                   {itemsSummary(item) && <div className="sub-text ellipsis">{itemsSummary(item)}</div>}
                   <div className="sub-text">
                     계약일 {item.contractDate} · 작성 {item.ownerName}
                   </div>
                 </td>
-                {showAmount && (
+                {showAmount && item.amountHidden && (
+                  // 다른 사람 계약('본인 계약만' 실장): 금액 비공개
+                  <>
+                    <td data-label="계약금액" className="text-right amount-cell sub-text">비공개</td>
+                    <td data-label="입금 / 잔액" className="text-right amount-cell sub-text">-</td>
+                  </>
+                )}
+                {showAmount && !item.amountHidden && (
                   <>
                     <td data-label="계약금액" className="text-right amount-cell">
                       <div className="amount-main nowrap">{won(a.actual)}원</div>

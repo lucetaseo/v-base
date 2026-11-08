@@ -1,18 +1,23 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { usePageTitle } from '../utils/title.js';
 import { API_MODE, engineerApp } from '../api/index.js';
 import { useAuth } from '../auth/AuthContext.jsx';
-import { MOBILE_STATUS, OFF_LABEL } from '../constants.js';
+import { DEFAULT_SCHEDULE_SETTINGS, MOBILE_STATUS, OFF_LABEL } from '../constants.js';
 import { timeLabel } from '../utils/contract.js';
 import { WEEKDAYS, addDays, formatKoreanDate, toDateKey, today } from '../utils/date.js';
 import { won } from '../utils/format.js';
 import OffModal from '../components/OffModal.jsx';
 import { goBack, match, navigate, navigateForward } from '../router.js';
+import { loginEntry } from './LoginPage.jsx';
 import { useRefreshOnReturn } from '../utils/useRefreshOnReturn.js';
 import PhotoViewer from '../components/PhotoViewer.jsx';
+import WorkRecord from '../components/WorkRecord.jsx';
+import LineItems from '../components/LineItems.jsx';
 
 // 기사모바일: 기사 계정으로 로그인하면 이 화면만 보입니다 (휴대폰 화면 기준).
 export default function EngineerApp({ route }) {
   const { user, company, logout } = useAuth();
+  usePageTitle(`기사모바일 · ${company?.name || ''} VerityBase`, `${company?.name || ''} 기사`.trim());
   const tab = route?.path === '/m/off' ? 'off' : 'schedule';
   const detail = route && match('/m/contract/:id', route.path);
   // 기사 계정은 /engineer 주소만 사용
@@ -41,8 +46,9 @@ export default function EngineerApp({ route }) {
           type="button"
           className="btn-logout"
           onClick={async () => {
+            const back = loginEntry() === 'engineer' ? '/m' : '/'; // 기사모바일(/m)로 들어왔으면 기사 로그인 화면으로
             await logout();
-            navigate('/', { replace: true });
+            navigate(back, { replace: true });
           }}
         >
           로그아웃
@@ -75,6 +81,7 @@ function MySchedules() {
   const [picked, setPicked] = useState(memo.date || today());
   const [list, setList] = useState([]);
   const [offs, setOffs] = useState([]);
+  const [fairList, setFairList] = useState([]); // 내 박람회 일정 (본인이 포함된 것만)
   const [year, month] = ym;
 
   useEffect(() => {
@@ -89,10 +96,11 @@ function MySchedules() {
         : view === 'upcoming'
           ? [t, addDays(t, 30)]
           : [addDays(t, -30), addDays(t, -1)];
-    Promise.all([engineerApp.mySchedules({ from, to }), engineerApp.myOffs({ from, to })])
-      .then(([sch, off]) => {
+    Promise.all([engineerApp.mySchedules({ from, to }), engineerApp.myOffs({ from, to }), engineerApp.myFairs({ from, to }).catch(() => [])])
+      .then(([sch, off, fr]) => {
         setList(sch);
         setOffs(off);
+        setFairList(fr);
       })
       .catch(handleError);
   }, [view, year, month, handleError]);
@@ -118,10 +126,12 @@ function MySchedules() {
     if (view === 'calendar') map[picked] = [];
     else if (view === 'upcoming') map[today()] = [];
     if (view !== 'calendar') offs.forEach((o) => (map[o.date] = map[o.date] || []));
+    if (view !== 'calendar') fairList.forEach((f) => (map[f.date] = map[f.date] || []));
     list.forEach((s) => (view !== 'calendar' || s.date === picked) && (map[s.date] = map[s.date] || []).push(s));
     return Object.entries(map).sort(([a], [b]) => a.localeCompare(b));
-  }, [list, offs, view, picked]);
+  }, [list, offs, fairList, view, picked]);
   const offOf = (date) => offs.find((o) => o.date === date);
+  const fairsOf = (date) => fairList.filter((f) => f.date <= date && (f.endDate || f.date) >= date);
   const countOf = useMemo(() => {
     const m = {};
     list.forEach((s) => (m[s.date] = (m[s.date] || 0) + 1));
@@ -171,6 +181,7 @@ function MySchedules() {
                   >
                     <div className="day-number">{Number(date.slice(8))}</div>
                     {off && <span className={`off-chip off-${off.period}`}>{OFF_LABEL[off.period]}</span>}
+                    {fairsOf(date).length > 0 && <span className="fair-chip mini">박람회</span>}
                     {countOf[date] && <div className="schedule-badge">일정 {countOf[date]}</div>}
                   </div>
                 );
@@ -190,7 +201,14 @@ function MySchedules() {
             {offOf(date) && <span className={`off-chip off-${offOf(date).period}`}>{OFF_LABEL[offOf(date).period]} 휴무</span>}
           </h4>
           {offOf(date) && <div className="sub-text">휴무 사유: {offOf(date).reason}</div>}
-          {rows.length === 0 && !offOf(date) && (
+          {fairsOf(date).map((f) => (
+            <div key={`fair${f.id}`} className="day-fair-row">
+              <span className="fair-chip">박람회</span>
+              <strong className="fair-names">{f.label}</strong>
+              {f.endDate && <span className="sub-text">({f.date} ~ {f.endDate})</span>}
+            </div>
+          ))}
+          {rows.length === 0 && !offOf(date) && !fairsOf(date).length && (
             <div className="engineer-card empty">{date === today() ? '오늘' : '이 날'} 배정된 일정이 없습니다.</div>
           )}
           {rows.map((s) => (
@@ -232,16 +250,57 @@ function ScheduleCard({ s, onReported }) {
 }
 
 // 현장 보고 (상태 + 메모) → 사무실 계약서 '모바일웹' 칸에 표시
+//   '시공완료'를 고르면 시공 범위 체크(한 것 / 못 한 것) + 사용 자재·색상 → 사무실에 '시공 기록'(누가·언제·무엇을·무엇으로)
+const scopeKey = (g, p) => `${g}|${p}`;
+// 시공완료 보고: 항목마다 완료 체크(기본 체크) + 자재·색상 + 작업자(팀장), 함께한 사람, 직접 적기
 function ReportForm({ contractId, step, onReported }) {
-  const { handleError } = useAuth();
+  const { handleError, company } = useAuth();
+  const materials = company?.scheduleSettings?.materials || DEFAULT_SCHEDULE_SETTINGS.materials; // 설정 > 일정관리설정의 시공 자재 목록
+  const listId = `materials-${contractId}-${step.stepIndex}`;
   const [d, setD] = useState({ mobileStatus: step.mobileStatus || '', memo: step.mobileMemo || '' });
+  const scope = step.scope || [];
+  // 항목별 입력값 { [key]: { done, material, worker } } — 지난 기록이 있으면 그 값으로 시작
+  const initialRows = () => {
+    const rec = step.workRecord || {};
+    const prev = new Map((rec.items || []).map((x) => [x.text, x]));
+    const undone = new Set(rec.undone || []);
+    return Object.fromEntries(
+      scope.flatMap((g) =>
+        g.parts.map((p) => {
+          const old = prev.get(p);
+          return [scopeKey(g.group, p), { done: old ? old.done !== false : !undone.has(p), material: old?.material || '', color: old?.color || '', worker: old?.worker || '' }];
+        }),
+      ),
+    );
+  };
+  const [rows, setRows] = useState(initialRows);
+  const [material, setMaterial] = useState(step.workRecord?.material || '');
+  const [color, setColor] = useState(step.workRecord?.color || '');
+  const [helpers, setHelpers] = useState(step.workRecord?.helpers || '');
+  const [note, setNote] = useState(step.workRecord?.note || '');
   useEffect(() => {
     setD({ mobileStatus: step.mobileStatus || '', memo: step.mobileMemo || '' });
-  }, [step.mobileStatus, step.mobileMemo]);
+    setRows(initialRows());
+    setMaterial(step.workRecord?.material || '');
+    setColor(step.workRecord?.color || '');
+    setHelpers(step.workRecord?.helpers || '');
+    setNote(step.workRecord?.note || '');
+  }, [step.mobileStatus, step.mobileMemo, step.workRecord]); // eslint-disable-line react-hooks/exhaustive-deps
+  const setRow = (k, patch) => setRows((prev) => ({ ...prev, [k]: { ...prev[k], ...patch } }));
+  const completing = d.mobileStatus === '시공완료'; // 상품이 없는 계약도 자재·함께한 사람·직접 적기 칸은 나옴
 
   const report = async () => {
+    const items = scope.flatMap((g) => g.parts.map((p) => ({ text: p, ...(rows[scopeKey(g.group, p)] || { done: true }) })));
+    const undone = items.filter((x) => !x.done).map((x) => x.text);
+    if (completing && undone.length && !window.confirm(`체크하지 않은 항목 ${undone.length}개는 '미시공'으로 사무실에 보고됩니다.\n${undone.join(', ')}\n\n보고할까요?`)) return;
     try {
-      await engineerApp.report({ contractId, stepIndex: step.stepIndex, mobileStatus: d.mobileStatus, memo: d.memo });
+      await engineerApp.report({
+        contractId,
+        stepIndex: step.stepIndex,
+        mobileStatus: d.mobileStatus,
+        memo: d.memo,
+        ...(completing ? { items, material, color, helpers, note } : {}),
+      });
       alert('보고되었습니다. 사무실 계약서에 바로 표시됩니다.');
       onReported?.();
     } catch (e) {
@@ -259,6 +318,57 @@ function ReportForm({ contractId, step, onReported }) {
         <input className="input-text" placeholder="보고 메모 (선택)" value={d.memo} onChange={(e) => setD({ ...d, memo: e.target.value })} />
         <button type="button" className="btn-confirm" onClick={report}>보고</button>
       </div>
+      {completing && (
+        <div className="scope-check">
+          <div className="scope-check-title">🧾 시공 기록</div>
+          <input className="input-text full" placeholder="함께한 팀장·작업자 (예: 김민수 팀장, 이지훈)" value={helpers} onChange={(e) => setHelpers(e.target.value)} maxLength={200} />
+          {scope.map((g) => (
+            <div key={g.group} className="scope-group">
+              <div className="scope-group-name">{g.group}</div>
+              {g.parts.map((p) => {
+                const k = scopeKey(g.group, p);
+                const r = rows[k] || { done: true, material: '', color: '', worker: '' };
+                return (
+                  <div key={k} className={`scope-row ${r.done ? '' : 'undone'}`}>
+                    <label className="scope-item">
+                      <input type="checkbox" checked={r.done} onChange={(e) => setRow(k, { done: e.target.checked })} /> {p}
+                    </label>
+                    {r.done && (
+                      <div className="scope-row-fields">
+                        <input className="input-text mat" list={listId} placeholder="자재 (눌러서 고르기)" value={r.material} onChange={(e) => setRow(k, { material: e.target.value })} maxLength={100} />
+                        <input className="input-text num" placeholder="번호" value={r.color} onChange={(e) => setRow(k, { color: e.target.value })} maxLength={30} />
+                        <input className="input-text worker" placeholder="작업자(팀장)" value={r.worker} onChange={(e) => setRow(k, { worker: e.target.value })} maxLength={50} />
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          ))}
+          <div className="scope-common">
+            <span className="sub-text">{scope.length ? '공통 자재 (항목에 안 적으면 이것으로)' : '사용 자재'}</span>
+            <div className="scope-row-fields">
+              <input className="input-text mat" list={listId} placeholder="자재 (눌러서 고르기)" value={material} onChange={(e) => setMaterial(e.target.value)} maxLength={200} />
+              <input className="input-text num" placeholder="번호" value={color} onChange={(e) => setColor(e.target.value)} maxLength={30} />
+            </div>
+          </div>
+          <datalist id={listId}>
+            {materials.map((m) => (
+              <option key={m} value={m} />
+            ))}
+          </datalist>
+          <textarea
+            className="input-text full scope-note"
+            rows={3}
+            placeholder="직접 적기 (예: 고객 요청으로 현관 추가 시공, 샤워벽은 다음 방문)"
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            maxLength={1000}
+          />
+          {scope.length > 0 && <div className="sub-text">못 한 항목만 체크를 풀어 주세요. 작업자를 비워 두면 보고하는 본인으로 기록됩니다.</div>}
+        </div>
+      )}
+      {step.workRecord && d.mobileStatus === '시공완료' && <WorkRecord record={step.workRecord} />}
       {step.reportedAt && <div className="sub-text">마지막 보고: {new Date(step.reportedAt).toLocaleString('ko-KR')}</div>}
     </>
   );
@@ -390,16 +500,12 @@ function ContractView({ id, step }) {
           <tr>
             <th>패키지</th>
             <td colSpan={3}>
-              {c.lineItems.map((l, i) => (
-                <div key={i}>
-                  {l.name}
-                  {l.qty > 1 && ` x${l.qty}`}
-                  {l.detail && <span className="sub-text"> — {l.detail}</span>}
-                </div>
-              ))}
+              <LineItems lines={c.lineItems} kind="패키지" />
             </td>
             <th>추가시공품목</th>
-            <td className="pre-wrap">{c.items}</td>
+            <td>
+              <LineItems lines={c.lineItems} kind="추가시공품목" extra={c.items} />
+            </td>
           </tr>
           <tr>
             <th>계약금액</th>
@@ -463,11 +569,11 @@ function ContractView({ id, step }) {
                   {x.status === '취소' && <div className="text-red sub-text">취소</div>}
                 </td>
                 <td className="text-left">
-                  {x.lineItems.map((l, i) => (
-                    <div key={i}>{l.name}</div>
-                  ))}
+                  <LineItems lines={x.lineItems} kind="패키지" withDetail={false} />
                 </td>
-                <td className="text-left pre-wrap items-cell">{x.items}</td>
+                <td className="text-left items-cell">
+                  <LineItems lines={x.lineItems} kind="추가시공품목" withDetail={false} extra={x.items} />
+                </td>
                 <td className="text-left nowrap">
                   {[0, 1, 2].map((i) => (
                     <div key={i}>

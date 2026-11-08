@@ -4,13 +4,12 @@
 // ============================================================
 
 import { loadDb, saveDb, nextId, publicBaseUrl, clientInfo, getSession, setSession, alimtalkGateway, hashPassword } from './runtime.js';
-import { ApiError, authorize, clone, findContract, isLoginIdTaken, nowIso, validatePassword, visibleContracts } from './core.js';
+import { ApiError, authorize, authorizeAny, clone, companyOf, findContract, findReadableContract, ownsContract, readableContracts, isLoginIdTaken, nowIso, validatePassword, visibleContracts } from './core.js';
 import { addHistory, assigneeOf, contractListView, contractView, hideAmounts } from './views.js';
 import { assertAssignable } from './schedule.js';
 import { invalidateNumbers, numberOf } from './numbering.js';
 import { can, ROLES, DATA_SCOPES, DEFAULT_MANAGER_PERMISSIONS, isOwnScopeOnly } from '../auth/permissions.js';
 import {
-  APPROVAL_STATUS,
   ASSIGN_TYPES,
   CATEGORIES,
   COMPANY_DOC_FIELDS,
@@ -28,12 +27,13 @@ import {
   SIGN_TOGETHER,
   DEPARTMENTS,
   POSITIONS,
+  PRODUCT_KINDS,
 } from '../constants.js';
 import { inRange, isDateKey, isoToDateKey, today } from '../utils/date.js';
 import { digitsOnly, formatAddress, formatPhone, won } from '../utils/format.js';
-import { calcAmounts, firstScheduleDate } from '../utils/contract.js';
+import { calcAmounts, firstScheduleDate, timeLabel } from '../utils/contract.js';
 import { ALIMTALK_TEMPLATES } from '../utils/alimtalk.js';
-import { categoriesFromName } from '../utils/legacyImport.js';
+import { categoriesFromName, legacyKeys } from '../utils/legacyImport.js';
 
 // ------------------------------------------------------------
 // 검색
@@ -76,7 +76,6 @@ export function matchesFilter(c, f) {
   if (f.workType && c.workType !== f.workType) return false;
   if (f.receptionType && c.receptionType !== f.receptionType) return false;
   if (f.status && c.status !== f.status) return false;
-  if (f.approval && c.approval !== f.approval) return false;
   if (f.esignStatus && c.esign?.status !== f.esignStatus) return false;
   if (f.ownerId && c.ownerId !== Number(f.ownerId)) return false;
   if (f.engineerId && !(c.schedules || []).some((s) => s.engineerId === Number(f.engineerId))) return false;
@@ -117,7 +116,7 @@ function normalizeSchedules(db, user, input = [], prev = []) {
     return {
       date: isDateKey(s.date) ? s.date : '',
       time: /^\d{2}:\d{2}$/.test(s.time || '') ? s.time : '',
-      ampm: s.time ? '' : oneOf(s.ampm, ['AM', 'PM'], ''),
+      ampm: s.time ? '' : oneOf(s.ampm, ['AM', 'PM', 'ANY'], ''), // ANY = 시간 무관
       assignType,
       engineerId: assignType === ASSIGN_TYPES.ENGINEER && engineerIds.has(Number(s.engineerId)) ? Number(s.engineerId) : null,
       teamId: assignType === ASSIGN_TYPES.TEAM && teamIds.has(Number(s.teamId)) ? Number(s.teamId) : null,
@@ -127,6 +126,7 @@ function normalizeSchedules(db, user, input = [], prev = []) {
       mobileMemo: old.mobileMemo || '',
       reportedAt: old.reportedAt || null,
       reportedBy: old.reportedBy || '',
+      ...(old.workRecord ? { workRecord: old.workRecord } : {}), // 기사 시공 기록도 기사만 변경
     };
   });
   if (!out.length) out.push(normalizeSchedules(db, user, [{}])[0]);
@@ -163,9 +163,8 @@ function normalizeContractInput(db, user, data, existing) {
     ownerId = staff.id;
   }
 
-  const approval = can(user, 'contract.approve')
-    ? oneOf(data.approval, APPROVAL_STATUS, '승인')
-    : existing?.approval || '승인대기';
+  // 계약승인: 쓰지 않음 (승인 기능 삭제) — 새 계약은 '승인', 예전 계약은 저장된 값 그대로 둠 (화면에 안 나옴)
+  const approval = existing?.approval || '승인';
 
   const status = oneOf(data.status, WORK_STATUS, '미정');
   const out = {
@@ -203,10 +202,15 @@ function normalizeContractInput(db, user, data, existing) {
   if (status === '취소' && !out.cancelReason) throw new ApiError('취소 사유를 입력해 주세요.');
 
   if (can(user, 'contract.amount')) {
+    const blank = (l) => !String(l.name || '').trim();
+    // 완전히 빈 줄은 무시, 금액·내용이 있는데 상품명이 없으면 막음 (조용히 버리면 금액이 사라짐)
+    if ((data.lineItems || []).some((l) => blank(l) && (Number(l.unitPrice) || String(l.detail || '').trim()))) throw new ApiError('상품명이 비어 있는 줄이 있습니다. 상품명을 입력하거나 그 줄을 삭제해 주세요.');
     out.lineItems = (data.lineItems || [])
-      .filter((l) => String(l.name || '').trim())
+      .filter((l) => !blank(l))
       .map((l) => ({
         productId: l.productId ? Number(l.productId) : null,
+        // 계약 등록 화면에서 [패키지] / [추가시공품목] 칸 구분 — 화면이 보낸 경우만 (예전 줄은 화면이 상품 구분으로 판단)
+        ...(l.kind === '추가시공품목' || l.kind === '패키지' ? { kind: l.kind } : {}),
         name: String(l.name).trim(),
         detail: l.detail || '',
         qty: Math.max(1, Math.floor(Number(l.qty) || 1)),
@@ -233,6 +237,34 @@ function normalizeContractInput(db, user, data, existing) {
       seen.add(id);
       return normalizePayment(p, id);
     });
+  } else if (Array.isArray(data.lineItems)) {
+    // 금액 권한이 없어도 시공선택(패키지·추가시공품목)은 가능 — 가격은 화면에서 안 보이므로 서버가 정함
+    //   이미 있던 줄(같은 상품·이름)은 원래 가격·수량 그대로, 새로 고른 상품은 상품관리 가격, 직접입력은 0원
+    //   할인·상품권·입금은 바꾸지 않음
+    const blank = (l) => !String(l.name || '').trim();
+    if (data.lineItems.some((l) => blank(l) && String(l.detail || '').trim())) throw new ApiError('상품명이 비어 있는 줄이 있습니다. 상품명을 입력하거나 그 줄을 삭제해 주세요.');
+    const prev = existing?.lineItems || [];
+    const used = new Set();
+    out.lineItems = data.lineItems
+      .filter((l) => !blank(l))
+      .map((l) => {
+        const name = String(l.name).trim();
+        const productId = l.productId ? Number(l.productId) : null;
+        const k = prev.findIndex((x, j) => !used.has(j) && x.name === name && (x.productId || null) === productId);
+        if (k >= 0) used.add(k);
+        const product = productId && db.products.find((x) => x.id === productId && x.companyId === user.companyId);
+        return {
+          productId,
+          ...(l.kind === '추가시공품목' || l.kind === '패키지' ? { kind: l.kind } : {}),
+          name,
+          detail: l.detail || '',
+          qty: k >= 0 ? prev[k].qty || 1 : 1,
+          unitPrice: k >= 0 ? prev[k].unitPrice || 0 : Math.max(0, Number(product?.price) || 0),
+        };
+      });
+    out.totalAmount = out.lineItems.length ? out.lineItems.reduce((sum, l) => sum + l.qty * l.unitPrice, 0) : existing ? existing.totalAmount || 0 : 0;
+    const off = (Number(existing?.discount) || 0) + (Number(existing?.voucher) || 0);
+    if (off > out.totalAmount) throw new ApiError('할인/상품권 금액이 시공총액보다 커집니다. 관리자에게 금액 조정을 요청해 주세요.');
   }
   return out;
 }
@@ -317,8 +349,10 @@ function syncReceiptCounts(db, c) {
 function cleanReceipts(db, c) {
   if (!db.paymentReceipts) return;
   const ids = new Set((c.payments || []).map((p) => p.id));
-  db.paymentReceipts = db.paymentReceipts.filter((r) => r.contractId !== c.id || r.kind === PAPER_KIND || ids.has(r.paymentId));
+  db.paymentReceipts = db.paymentReceipts.filter((r) => r.contractId !== c.id || r.kind || ids.has(r.paymentId)); // kind 있는 사진(실물 계약서·AS)은 입금과 무관
 }
+
+const CUSTOMER_LINKS_VERSION = 1;
 
 // ---------------- 실물(종이) 계약서 사진 ----------------
 //   영수증 사진과 같은 표(paymentReceipts)에 kind 'contractPaper' 로 저장 — 계약 목록에는 싣지 않고 열 때만 읽음
@@ -328,23 +362,33 @@ const PAPER_KIND = 'contractPaper';
 export const PAPER_PHOTOS_MAX = 10;
 const paperPhotosOf = (db, c) => (db.paymentReceipts || []).filter((r) => r.contractId === c.id && r.kind === PAPER_KIND);
 
+// ---------------- AS 사진 ----------------
+//   AS 접수 때 함께 올린 사진 (하자 부위 등). 같은 표(paymentReceipts)에 kind 'asPhoto', asIndex(몇 번째 AS 회차, 0부터)로 저장
+//   회차에는 사진 장수만(photoCount) 남기고, 사진은 볼 때만 읽음
+const AS_KIND = 'asPhoto';
+export const AS_PHOTOS_MAX = 5;
+const asPhotosOf = (db, c) => (db.paymentReceipts || []).filter((r) => r.contractId === c.id && r.kind === AS_KIND);
+
 // 같은 계약 묶음: 같은 계약자 + 같은 현장(아파트/동/호)의 시공들
 const groupKey = (c) => [c.customerId, c.aptName, c.dong, c.ho].join('|');
 
 // 고객에게 한 장으로 보내는 계약서 묶음
-//   - 같은 고객(이름+전화번호) · 같은 회사(브랜드)의 줄눈·청소(SIGN_TOGETHER) 계약끼리
+//   - 같은 고객(이름+전화번호) · 같은 회사(브랜드) · 같은 현장 · 같은 계약일의 줄눈·청소(SIGN_TOGETHER) 계약끼리
 //   - 나노코팅 등 다른 구분, 다른 브랜드는 따로 한 장
 //   - 서명 전: 그중 아직 서명 안 된 계약 전부 / 서명 후: 그때 함께 서명한 계약들 (같은 서명 링크)
-const signKey = (c) => [String(c.customerName || '').replace(/\s+/g, ''), digitsOnly(c.customerPhone), c.brand].join('|');
+//   현장(아파트·동·호)이 다르면 같은 날 계약이라도 따로 한 장 (현장마다 계약서를 따로 받음)
+//   같은 사람이 여러 번 계약하는 경우: 계약일이 같은 것끼리만 한 장 (예전 계약·다른 날 재계약은 따로 서명)
+const signKey = (c) =>
+  [String(c.customerName || '').replace(/\s+/g, ''), digitsOnly(c.customerPhone), c.brand, formatAddress(c), c.contractDate || ''].join('|');
 
-function signBundle(db, user, base) {
+function signBundle(db, user, base, pool = visibleContracts(db, user)) {
   if (base.deletedAt || !SIGN_TOGETHER.includes(base.category)) return [base];
   const key = signKey(base);
-  const same = visibleContracts(db, user).filter((c) => !c.deletedAt && SIGN_TOGETHER.includes(c.category) && signKey(c) === key);
   const signed = base.esign?.status === ESIGN_STATUS.SIGNED;
+  // 서명 후: 그때 함께 서명한 계약들 그대로 (예전 규칙으로 여러 현장을 한 장에 서명한 것도 그대로 보이게 — 링크로 찾음)
   const list = signed
-    ? same.filter((c) => c === base || (base.esign.token && c.esign?.token === base.esign.token))
-    : same.filter((c) => c.esign?.status !== ESIGN_STATUS.SIGNED);
+    ? pool.filter((c) => !c.deletedAt && (c === base || (base.esign.token && c.esign?.token === base.esign.token)))
+    : pool.filter((c) => !c.deletedAt && SIGN_TOGETHER.includes(c.category) && signKey(c) === key && c.esign?.status !== ESIGN_STATUS.SIGNED);
   if (!list.includes(base)) list.push(base);
   return list.sort((a, b) => a.id - b.id);
 }
@@ -362,7 +406,6 @@ function diffContract(db, before, after) {
   push('구분', before.category, after.category);
   push('시공종류', before.workType, after.workType);
   push('접수형태', before.receptionType, after.receptionType);
-  push('계약승인', before.approval, after.approval);
   push('시공상태', before.status, after.status);
   push('취소사유', before.cancelReason, after.cancelReason);
   push('연락처①', before.customerPhone, after.customerPhone);
@@ -374,7 +417,7 @@ function diffContract(db, before, after) {
   push('입주예정일', before.moveInDate, after.moveInDate);
   const sched = (s) => {
     if (!s || (!s.date && !s.engineerId && !s.teamId)) return '';
-    const when = s.time || (s.ampm === 'AM' ? '오전' : s.ampm === 'PM' ? '오후' : '');
+    const when = timeLabel(s);
     return `${s.date || '날짜미정'} ${when} ${assigneeOf(db, s).assigneeName || '미배정'}`.replace(/\s+/g, ' ').trim();
   };
   for (let i = 0; i < MAX_SCHEDULE_STEPS; i++) push(`시공일정${i + 1}`, sched(before.schedules?.[i]), sched(after.schedules?.[i]));
@@ -395,11 +438,27 @@ function diffContract(db, before, after) {
   return changes;
 }
 
-// 전화번호로 계약자를 찾고 없으면 자동 등록
-function upsertCustomerForContract(db, user, name, phone, phone2) {
+// 전화번호로 계약자를 찾고 없으면 자동 등록 (계약자관리에 자동으로 생김)
+//   site: 계약의 현장(아파트·동·호) → 계약자 주소로. 이미 있는 계약자는 비어 있는 칸(연락처②·주소)만 채움
+const siteAddress = (site) => {
+  const apt = String(site?.aptName || '').trim();
+  if (!apt) return '';
+  return [apt, site.dong && `${site.dong}동`, site.ho && `${site.ho}호`].filter(Boolean).join(' ');
+};
+// 계약 ↔ 계약자 연결: 이름 + 전화번호가 모두 같아야 같은 계약자 (동명이인·가족이 같은 번호를 써도 섞이지 않게)
+//   전화번호가 없으면(예전 자료 가져오기 등) 이름 + 현장까지 같아야 같은 계약자
+const sameCustomer = (cust, name, phone, site) => {
   const d = digitsOnly(phone);
-  let cust = db.customers.find((c) => c.companyId === user.companyId && digitsOnly(c.phone1) === d);
-  if (!cust) {
+  return String(cust.name || '').replace(/\s+/g, '') === String(name || '').replace(/\s+/g, '') && digitsOnly(cust.phone1) === d && (d !== '' || (cust.address1 || '') === siteAddress(site));
+};
+
+function upsertCustomerForContract(db, user, name, phone, phone2, site) {
+  const d = digitsOnly(phone);
+  let cust = db.customers.find((c) => c.companyId === user.companyId && sameCustomer(c, name, phone, site));
+  if (cust) {
+    if (!cust.phone2 && phone2 && digitsOnly(phone2) !== d) cust.phone2 = phone2;
+    if (!cust.address1 && siteAddress(site)) cust.address1 = siteAddress(site);
+  } else {
     cust = {
       id: nextId(db, 'customers'),
       companyId: user.companyId,
@@ -409,7 +468,7 @@ function upsertCustomerForContract(db, user, name, phone, phone2) {
       phone2: phone2 || '',
       email: '',
       zipcode: '',
-      address1: '',
+      address1: siteAddress(site),
       address2: '',
       createdBy: user.id,
       createdAt: nowIso(),
@@ -419,17 +478,35 @@ function upsertCustomerForContract(db, user, name, phone, phone2) {
   return cust;
 }
 
+// 시연용 샘플 계약 (contracts.sampleAdd / sampleClear)
+const SAMPLE_MAX = 200;
+const SAMPLE_LAST = ['김', '이', '박', '최', '정', '강', '조', '윤', '장', '임', '한', '오', '서', '신', '권', '황', '안', '송', '류', '홍'];
+const SAMPLE_FIRST = ['민준', '서연', '도윤', '지우', '하준', '서윤', '시우', '하은', '주원', '지유', '지호', '수아', '예준', '지민', '건우', '채원', '현우', '다은', '준서', '예린'];
+const SAMPLE_APTS = ['샘플힐스테이트', '시연자이', '데모푸르지오', '예시래미안', '가상아이파크', '테스트e편한세상'];
+
+async function sampleTarget(companyId) {
+  const { db, user } = await authorize();
+  if (user.role !== ROLES.SUPER) throw new ApiError('운영자만 사용할 수 있습니다.', 'FORBIDDEN');
+  const company = db.companies.find((c) => c.id === Number(companyId));
+  if (!company) throw new ApiError('업체를 찾을 수 없습니다.', 'NOT_FOUND');
+  const owner =
+    db.users.find((u) => u.companyId === company.id && u.role === ROLES.ADMIN && u.active !== false) || db.users.find((u) => u.companyId === company.id);
+  if (!owner) throw new ApiError('이 업체에 계정이 없습니다. 먼저 업체 관리자 계정을 만들어 주세요.');
+  return { db, owner, company };
+}
+
 // ============================================================
 // 계약
 // ============================================================
 
 export const contracts = {
-  // filters: { trash, dateType, startDate, endDate, aptName, dong, ho, customerName, phone, brand, category,
-  //            workType, receptionType, status, approval, esignStatus, ownerId, engineerId, sort }
+  // filters: { trash, as(AS관리 목록), dateType, startDate, endDate, aptName, dong, ho, customerName, phone, brand, category,
+  //            workType, receptionType, status, esignStatus, ownerId, engineerId, sort }
   async list(filters = {}) {
     const { db, user } = await authorize('contract.view');
-    return visibleContracts(db, user)
+    return readableContracts(db, user)
       .filter((c) => (filters.trash ? !!c.deletedAt : !c.deletedAt))
+      .filter((c) => filters.trash || (filters.as ? !!c.asAt : !c.asAt)) // AS관리로 넘긴 계약은 AS관리 목록에만
       .filter((c) => matchesFilter(c, filters))
       .map((c) => contractListView(c, user, db))
       .sort(SORTERS[filters.sort] || SORTERS.no_desc);
@@ -444,15 +521,13 @@ export const contracts = {
     let maxUpd = '';
     let idSum = 0;
     if (db.contractSummary) {
-      db.contractSummary
-        .filter((s) => !isOwnScopeOnly(user) || s.ownerId === String(user.id))
-        .forEach((s) => {
-          count += s.count;
-          if (s.maxUpd > maxUpd) maxUpd = s.maxUpd;
-          idSum += s.idSum;
-        });
+      db.contractSummary.forEach((s) => {
+        count += s.count;
+        if (s.maxUpd > maxUpd) maxUpd = s.maxUpd;
+        idSum += s.idSum;
+      });
     } else {
-      visibleContracts(db, user).forEach((c) => {
+      readableContracts(db, user).forEach((c) => {
         count += 1;
         if ((c.updatedAt || '') > maxUpd) maxUpd = c.updatedAt || '';
         idSum += c.id;
@@ -476,7 +551,7 @@ export const contracts = {
 
   async get(id) {
     const { db, user } = await authorize('contract.view');
-    const c = findContract(db, user, id);
+    const c = findReadableContract(db, user, id);
     const view = contractView(c, user, db);
     if (c.esign?.signature) view.esign.signature = c.esign.signature;
     return view;
@@ -486,7 +561,7 @@ export const contracts = {
     const { db, user } = await authorize('contract.create');
     const fields = normalizeContractInput(db, user, data, null);
     assertSchedulesAssignable(db, user, fields.schedules, [], null);
-    const cust = upsertCustomerForContract(db, user, fields.customerName, fields.customerPhone, fields.customerPhone2);
+    const cust = upsertCustomerForContract(db, user, fields.customerName, fields.customerPhone, fields.customerPhone2, fields);
     const contract = {
       totalAmount: 0,
       discount: 0,
@@ -510,6 +585,84 @@ export const contracts = {
     return contractView(contract, user, db);
   },
 
+  // 시연용 샘플 계약 (운영자 전용) — 시연 업체에 가짜 계약을 넣고 지움. 변경이력·수정로그는 남기지 않음
+  //   이름·아파트는 가짜, 전화번호는 010-0000-xxxx (실제 사람에게 연락이 가지 않게), 표시 sample: true
+  async sampleAdd(companyId, count = 100) {
+    const { db, owner, company } = await sampleTarget(companyId);
+    const n = Math.min(SAMPLE_MAX, Math.max(1, Math.floor(Number(count) || 0)));
+    const staff = db.users.filter((u) => u.companyId === company.id && u.active !== false);
+    const engineers = db.engineers.filter((e) => e.companyId === company.id && e.active !== false);
+    const products = db.products.filter((p) => p.companyId === company.id && p.visible !== false);
+    const brands = company.brands?.length ? company.brands : [company.name];
+    const cats = CATEGORIES.filter((c) => c !== '기타');
+    const pick = (a) => a[Math.floor(Math.random() * a.length)];
+    const between = (lo, hi) => lo + Math.floor(Math.random() * (hi - lo + 1));
+    const addDays = (key, d) => new Date(Date.parse(`${key}T00:00:00Z`) + d * 86400000).toISOString().slice(0, 10);
+    const now = today();
+    for (let i = 0; i < n; i++) {
+      const contractDate = addDays(now, -between(0, 90));
+      const workDate = addDays(contractDate, between(5, 40));
+      const category = pick(cats);
+      const product = pick(products.filter((p) => p.category === category).concat([null]));
+      const price = product?.price || pick([250000, 350000, 450000, 600000, 800000, 1200000]);
+      const done = workDate < now;
+      const status = done ? (Math.random() < 0.1 ? '취소' : '시공완료') : pick(['미정', '해피콜완료', '배정']);
+      const data = {
+        brand: pick(brands),
+        category,
+        customerName: pick(SAMPLE_LAST) + pick(SAMPLE_FIRST),
+        customerPhone: `010-0000-${String(between(0, 9999)).padStart(4, '0')}`,
+        aptName: pick(SAMPLE_APTS),
+        dong: String(between(101, 112)),
+        ho: String(between(1, 25) * 100 + between(1, 4)),
+        contractDate,
+        ownerId: staff.length ? pick(staff).id : owner.id,
+        approval: '승인',
+        status,
+        cancelReason: status === '취소' ? '고객 사정' : '',
+        canceledDate: status === '취소' ? workDate : '',
+        completedDate: status === '시공완료' ? workDate : '',
+        schedules: [{ date: workDate, ampm: pick(['AM', 'PM']), engineerId: status !== '미정' && engineers.length ? pick(engineers).id : null }],
+        lineItems: [{ productId: product?.id || null, name: product?.name || `${category} 시공`, detail: product?.detail || '', qty: 1, unitPrice: price }],
+        payments: Math.random() < 0.7 ? [{ date: contractDate, kind: '계약금', method: pick(['계좌이체', '카드', '현금']), amount: Math.round(price * 0.1 / 10000) * 10000 || 10000 }] : [],
+        memo: '시연용 샘플 데이터',
+      };
+      const fields = normalizeContractInput(db, owner, data, null);
+      const cust = upsertCustomerForContract(db, owner, fields.customerName, fields.customerPhone, '');
+      cust.sample = true;
+      db.contracts.push({
+        totalAmount: 0,
+        discount: 0,
+        voucher: 0,
+        ...fields,
+        id: nextId(db, 'contracts'),
+        companyId: company.id,
+        customerId: cust.id,
+        esign: { status: done ? ESIGN_STATUS.SIGNED : pick([ESIGN_STATUS.NONE, ESIGN_STATUS.WAITING]), token: null },
+        history: [], // 변경이력 남기지 않음
+        sample: true,
+        createdAt: nowIso(),
+        updatedAt: nowIso(),
+        deletedAt: null,
+      });
+    }
+    invalidateNumbers(db);
+    saveDb(db);
+    return { created: n, total: db.contracts.filter((c) => c.companyId === company.id && c.sample).length };
+  },
+
+  // 샘플 계약만 모두 지움 (직접 등록한 계약은 그대로)
+  async sampleClear(companyId) {
+    const { db, company } = await sampleTarget(companyId);
+    const before = db.contracts.length;
+    db.contracts = db.contracts.filter((c) => !(c.companyId === company.id && c.sample));
+    const used = new Set(db.contracts.filter((c) => c.companyId === company.id).map((c) => c.customerId));
+    db.customers = db.customers.filter((c) => !(c.companyId === company.id && c.sample && !used.has(c.id)));
+    invalidateNumbers(db);
+    saveDb(db);
+    return { removed: before - db.contracts.length };
+  },
+
   async update(id, data) {
     const { db, user } = await authorize('contract.edit');
     const c = findContract(db, user, id);
@@ -518,22 +671,10 @@ export const contracts = {
     assertSchedulesAssignable(db, user, fields.schedules, c.schedules, c.id);
     const before = clone(c);
 
-    // 서명완료된 계약의 핵심 조건(금액/시공내용)이 바뀌면 재서명 필요
-    if (c.esign?.status === ESIGN_STATUS.SIGNED) {
-      const changed =
-        fields.items !== c.items ||
-        (fields.customerNote || '') !== (c.customerNote || '') || // 고객 참고사항도 계약서 내용
-        fields.asCoverage !== !!c.asCoverage || // 탄성·페인트 AS 보장범위·후기 페이백도 계약서 내용
-        fields.reviewPayback !== !!c.reviewPayback ||
-        ('totalAmount' in fields &&
-          (fields.totalAmount !== c.totalAmount ||
-            fields.discount !== c.discount ||
-            fields.voucher !== c.voucher ||
-            JSON.stringify(fields.lineItems) !== JSON.stringify(c.lineItems || [])));
-      if (changed) c.esign = { ...c.esign, status: ESIGN_STATUS.NONE, token: null, previousSignedAt: c.esign.signedAt };
-    }
-    if (fields.customerPhone !== c.customerPhone) {
-      c.customerId = upsertCustomerForContract(db, user, c.customerName, fields.customerPhone, fields.customerPhone2).id;
+    // 서명한 뒤 수정해도 다시 서명받지 않음 (서명은 한 번이면 됨 — 서명 링크도 그대로 살아 있음)
+    const linked = db.customers.find((x) => x.id === c.customerId);
+    if (fields.customerPhone !== c.customerPhone || !linked || !sameCustomer(linked, c.customerName, fields.customerPhone, { ...c, ...fields })) {
+      c.customerId = upsertCustomerForContract(db, user, c.customerName, fields.customerPhone, fields.customerPhone2, { ...c, ...fields }).id;
     }
     Object.assign(c, fields, { updatedAt: nowIso() });
     if ('payments' in fields) {
@@ -564,16 +705,41 @@ export const contracts = {
     return contractView(c, user, db);
   },
 
-  // 목록에서 선택 승인/미승인
-  async setApproval(ids, approval) {
-    const { db, user } = await authorize('contract.approve');
-    if (!APPROVAL_STATUS.includes(approval)) throw new ApiError('승인 상태를 선택해 주세요.');
+  // AS 접수(on=true) / AS 완료(on=false) — 계약 목록에서 여러 건, 계약 상세에서 한 건
+  //   info: AS 접수 { date(접수일), request(요청 내용) }
+  //   AS관리로 옮긴 계약은 계속 AS관리에 둠 (AS는 AS대로 관리). 재발할 수 있어 회차별로 쌓음:
+  //     asLogs [{ date, request, byName, doneAt, doneBy }] — 완료해도 지우지 않음
+  //     - 계약관리에 있는 계약 → AS관리로 옮기며 1회 / AS관리에 있으면 다음 회차 추가
+  //     - AS 완료 → 처리 중인 회차에 완료일만 찍음 (AS관리에 그대로)
+  //   asInfo = 지금 처리 중인 회차 (없으면 null = 완료)
+  async setAs(ids, on = true, info = {}) {
+    const { db, user } = await authorize('contract.edit');
+    const request = String(info.request || '').trim().slice(0, 500);
+    if (on && !request) throw new ApiError('AS 요청 내용을 적어 주세요.');
+    const photos = on && Array.isArray(info.photos) ? info.photos.filter(Boolean) : [];
+    if (photos.length > AS_PHOTOS_MAX) throw new ApiError(`AS 사진은 한 번에 ${AS_PHOTOS_MAX}장까지 올릴 수 있습니다.`);
+    photos.forEach(checkReceiptImage);
+    if (photos.length) db.paymentReceipts = db.paymentReceipts || [];
     ids.forEach((id) => {
       const c = findContract(db, user, id);
-      if (c.approval === approval) return;
-      addHistory(c, user, '계약 승인 변경', [{ label: '계약승인', from: c.approval, to: approval }]);
-      c.approval = approval;
-      c.updatedAt = nowIso();
+      if (c.deletedAt) throw new ApiError('휴지통에 있는 계약입니다.');
+      const logs = c.asLogs || (c.asInfo ? [{ ...c.asInfo, doneAt: null }] : []);
+      if (on) {
+        const entry = { date: isDateKey(info.date) ? info.date : today(), request, byName: user.name, doneAt: null, ...(photos.length ? { photoCount: photos.length } : {}) };
+        photos.forEach((img) => {
+          db.paymentReceipts.push({ id: nextId(db, 'paymentReceipts'), companyId: user.companyId, contractId: c.id, paymentId: null, kind: AS_KIND, asIndex: logs.length, image: img, createdAt: nowIso() });
+        });
+        const again = !!c.asAt; // 이미 AS관리에 있음 → 재발·추가 접수
+        c.asLogs = [...logs, entry];
+        c.asInfo = entry;
+        c.asAt = c.asAt || nowIso();
+        addHistory(c, user, again ? 'AS 추가 접수' : 'AS관리로 이동', [{ label: `AS ${c.asLogs.length}회 접수`, from: '', to: `${entry.date} ${request}${photos.length ? ` (사진 ${photos.length}장)` : ''}` }]);
+      } else {
+        if (!c.asAt || !logs.some((l) => !l.doneAt)) return;
+        c.asLogs = logs.map((l) => (l.doneAt ? l : { ...l, doneAt: today(), doneBy: user.name }));
+        c.asInfo = null;
+        addHistory(c, user, 'AS 완료');
+      }
     });
     saveDb(db);
   },
@@ -613,16 +779,16 @@ export const contracts = {
   // GET /api/contracts/:id/group
   async group(id) {
     const { db, user } = await authorize('contract.view');
-    const base = findContract(db, user, id);
+    const base = findReadableContract(db, user, id);
     const key = groupKey(base);
-    const items = visibleContracts(db, user)
+    const items = readableContracts(db, user)
       .filter((c) => !c.deletedAt && groupKey(c) === key)
       .map((c) => contractView(c, user, db))
       .sort(SORTERS.no_desc);
     if (base.deletedAt) items.unshift(contractView(base, user, db));
     const customer = db.customers.find((c) => c.id === base.customerId);
     // 같은 계약자의 다른 현장 계약 (계약자 탭)
-    const others = visibleContracts(db, user)
+    const others = readableContracts(db, user)
       .filter((c) => !c.deletedAt && c.customerId === base.customerId && groupKey(c) !== key)
       .map((c) => contractView(c, user, db))
       .sort(SORTERS.no_desc);
@@ -647,10 +813,6 @@ export const contracts = {
     c.discount = d;
     c.voucher = v;
     c.discountReason = String(discountReason || '').trim().slice(0, 100);
-    // 서명완료된 계약의 금액이 바뀌면 재서명 필요
-    if (c.esign?.status === ESIGN_STATUS.SIGNED && (before.discount !== d || before.voucher !== v)) {
-      c.esign = { ...c.esign, status: ESIGN_STATUS.NONE, token: null, previousSignedAt: c.esign.signedAt };
-    }
     const changes = diffContract(db, before, c);
     if (changes.length) addHistory(c, user, '할인 적용', changes);
     c.updatedAt = nowIso();
@@ -658,10 +820,21 @@ export const contracts = {
     return contractView(c, user, db);
   },
 
+  // AS 사진 보기 (asIndex: 몇 번째 AS 회차 — 없으면 전부)
+  async asPhotos(id, asIndex) {
+    const { db, user } = await authorize('contract.view');
+    const c = findReadableContract(db, user, id);
+    const want = asIndex === undefined || asIndex === null ? null : Number(asIndex);
+    return asPhotosOf(db, c)
+      .filter((r) => want === null || r.asIndex === want)
+      .sort((a, b) => a.id - b.id)
+      .map((r) => ({ id: r.id, image: r.image, asIndex: r.asIndex, createdAt: r.createdAt }));
+  },
+
   // 실물 계약서 사진 보기
   async paperPhotos(id) {
     const { db, user } = await authorize('contract.view');
-    const c = findContract(db, user, id);
+    const c = findReadableContract(db, user, id);
     return paperPhotosOf(db, c)
       .sort((a, b) => a.id - b.id)
       .map((r) => ({ id: r.id, image: r.image, createdAt: r.createdAt }));
@@ -692,7 +865,8 @@ export const contracts = {
   async receipt(id, paymentId) {
     const { db, user } = await authorize('contract.view');
     if (!can(user, 'contract.amount')) throw new ApiError('금액·입금 정보 권한이 없습니다.', 'FORBIDDEN');
-    const c = findContract(db, user, id);
+    const c = findReadableContract(db, user, id);
+    if (!ownsContract(user, c)) throw new ApiError('금액·입금 정보 권한이 없습니다.', 'FORBIDDEN');
     const list = (db.paymentReceipts || []).filter((x) => x.contractId === c.id && x.paymentId === Number(paymentId)).sort((a, b) => a.id - b.id);
     if (!list.length) throw new ApiError('첨부된 영수증 사진이 없습니다.', 'NOT_FOUND');
     const images = list.map((r) => ({ id: r.id, image: r.image, createdAt: r.createdAt }));
@@ -764,7 +938,7 @@ export const contracts = {
     const { db, user } = await authorize('contract.view');
     const body = String(text || '').trim();
     if (!body) throw new ApiError('상담 내용을 입력해 주세요.');
-    const c = findContract(db, user, id);
+    const c = findReadableContract(db, user, id);
     c.notes = c.notes || [];
     c.notes.push({ id: Math.max(0, ...c.notes.map((n) => n.id)) + 1, at: nowIso(), byId: user.id, byName: user.name, text: body.slice(0, 2000) });
     c.updatedAt = nowIso();
@@ -775,7 +949,7 @@ export const contracts = {
   //   계약마다 추측할 수 없는 고유 값 하나 (처음 요청할 때 만들어 저장)
   async customerLink(id) {
     const { db, user } = await authorize('contract.view');
-    const c = findContract(db, user, id);
+    const c = findReadableContract(db, user, id);
     if (!c.customerToken) {
       c.customerToken = newToken();
       saveDb(db);
@@ -784,11 +958,54 @@ export const contracts = {
     return { token: c.customerToken, url: `${publicBaseUrl().replace(/\/+$/, '')}/${company?.code || ''}/c/${c.customerToken}` };
   },
 
+  // 계약자 연결 바로잡기 (한 번만): 예전에는 전화번호만으로 계약자를 찾아서
+  //   동명이인·전화번호 없는 계약(예전 자료)·가족이 같은 번호를 쓴 계약이 엉뚱한 계약자에 묶였음
+  //   → 이름 + 전화번호(없으면 현장)로 다시 연결. 화면이 로그인 뒤 자동으로 부름 (이미 했으면 바로 끝)
+  async repairCustomerLinks() {
+    const { db, user } = await authorize('contract.edit');
+    const company = companyOf(db, user);
+    if (!company) return { fixed: 0, restored: 0 };
+    const mine = db.contracts.filter((x) => x.companyId === user.companyId);
+    let fixed = 0;
+    let restored = 0;
+    if (!(company.customerLinksFixed >= CUSTOMER_LINKS_VERSION)) {
+      for (const c of mine) {
+        const linked = db.customers.find((x) => x.id === c.customerId);
+        if (linked && sameCustomer(linked, c.customerName, c.customerPhone, c)) continue;
+        const cust = upsertCustomerForContract(db, user, c.customerName, c.customerPhone, c.customerPhone2, c);
+        if (cust.id !== c.customerId) {
+          c.customerId = cust.id;
+          fixed++;
+        }
+      }
+      company.customerLinksFixed = CUSTOMER_LINKS_VERSION;
+    }
+    // 서명 되돌리기 (한 번만): 예전에는 서명 뒤 금액·시공내용을 고치면 서명이 풀리고 서명 링크 값도 지워졌음
+    //   → 이제는 다시 서명받지 않으므로, 그렇게 풀린 계약을 서명완료로 되돌림 (서명 이미지는 그대로 남아 있음)
+    //   링크 값: 같이 서명한 계약에 남은 값 → 다시 요청해서 생긴 지금 값 → 없으면 새로 만듦 (고객확인페이지 링크로도 열림)
+    if (!company.signRestored) {
+      for (const c of mine) {
+        const e = c.esign || {};
+        if (e.status === ESIGN_STATUS.SIGNED || !e.previousSignedAt || !e.signedAt) continue;
+        const peer = mine.find((x) => x !== c && x.esign?.status === ESIGN_STATUS.SIGNED && x.esign.token && x.esign.signedAt === e.signedAt && x.esign.signerName === e.signerName);
+        const token = peer?.esign.token || e.token || newToken();
+        const pastTokens = [...new Set([...(e.pastTokens || []), e.token].filter((v) => v && v !== token))].slice(-10);
+        const { previousSignedAt, ...rest } = e; // eslint-disable-line no-unused-vars
+        c.esign = { ...rest, status: ESIGN_STATUS.SIGNED, token, ...(pastTokens.length ? { pastTokens } : {}) };
+        addHistory(c, user, '서명완료로 되돌림 (수정해도 다시 서명받지 않도록 바뀜)');
+        restored++;
+      }
+      company.signRestored = true;
+    }
+    saveDb(db);
+    return { fixed, restored };
+  },
+
   // 계약서 보기: 고객에게 한 장으로 가는 계약 묶음 (첫 번째 = 요청한 계약 기준 서명 이미지 포함)
   async signBundle(id) {
     const { db, user } = await authorize('contract.view');
-    const base = findContract(db, user, id);
-    const list = signBundle(db, user, base);
+    const base = findReadableContract(db, user, id);
+    const list = signBundle(db, user, base, readableContracts(db, user));
     const signature = base.esign?.signature;
     const views = list.map((c) => {
       const v = contractView(c, user, db);
@@ -803,8 +1020,9 @@ export const contracts = {
 
   // POST /api/contracts/:id/esign  → 고객에게 서명 링크 발송
   //   같은 계약자·현장의 서명 안 된 계약(줄눈·청소 등)을 한 링크로 묶어 한 번에 서명
+  //   서명요청 권한, 또는 계약 등록 권한(등록 직후 그 자리에서 고객 서명 받기)이 있으면 됨
   async requestSign(id) {
-    const { db, user } = await authorize('esign.send');
+    const { db, user } = await authorizeAny(['esign.send', 'contract.create']);
     const c = findContract(db, user, id);
     if (c.deletedAt) throw new ApiError('휴지통에 있는 계약입니다.');
     if (c.esign?.status === ESIGN_STATUS.SIGNED) throw new ApiError('이미 서명이 완료된 계약입니다.');
@@ -812,12 +1030,14 @@ export const contracts = {
     const token = newToken();
     const together = list.length > 1 ? list.map((x) => x.category).join('·') : '';
     for (const x of list) {
-      x.esign = { ...x.esign, status: ESIGN_STATUS.WAITING, token, requestedAt: nowIso(), requestedBy: user.id };
+      // 예전에 보낸 서명 링크도 계속 열리게 이전 값을 보관 (bundleByToken)
+      const pastTokens = [...new Set([...(x.esign?.pastTokens || []), x.esign?.token].filter(Boolean))].slice(-10);
+      x.esign = { ...x.esign, status: ESIGN_STATUS.WAITING, token, pastTokens, requestedAt: nowIso(), requestedBy: user.id };
       x.updatedAt = nowIso();
       addHistory(x, user, together ? `전자서명 요청 (${together} 한 장으로)` : '전자서명 요청');
     }
     saveDb(db);
-    return { token, url: signUrlOf(token), count: list.length };
+    return { token, url: signUrlOf(token), count: list.length, ids: list.map((x) => x.id) };
   },
 };
 
@@ -886,8 +1106,19 @@ export const esign = {
   },
 };
 
+// 서명 링크 값 → 한 장으로 묶인 계약들
+//   /e/?q=값 에는 지금 서명 링크 값 말고도 이런 값이 올 수 있어 모두 받아 줌 (알림톡을 받은 고객이 '안 열린다'고 하지 않게)
+//     - 다시 서명 요청하기 전에 보냈던 예전 서명 링크 값 (pastTokens)
+//     - 고객확인페이지 값(customerToken) — 계약완료 알림톡의 #{ecode} 는 이 값이라 /e/?q= 로 보내도 열리게
 function bundleByToken(db, token) {
-  const list = token ? db.contracts.filter((x) => x.esign?.token === token && !x.deletedAt).sort((a, b) => a.id - b.id) : [];
+  const t = String(token || '');
+  const live = (x) => !x.deletedAt;
+  const byToken = (v) => (v ? db.contracts.filter((x) => live(x) && x.esign?.token === v).sort((a, b) => a.id - b.id) : []);
+  let list = byToken(t);
+  if (!list.length && t) {
+    const c = db.contracts.find((x) => live(x) && ((x.esign?.pastTokens || []).includes(t) || x.customerToken === t));
+    if (c) list = c.esign?.token ? byToken(c.esign.token) : [c];
+  }
   if (!list.length) throw new ApiError('유효하지 않거나 만료된 서명 링크입니다.', 'NOT_FOUND');
   return list;
 }
@@ -900,9 +1131,10 @@ export const notifications = {
   // templateKey/templateCode/variables/buttons: 비즈고 알림톡 발송용 (utils/alimtalk.js 에서 만든 값)
   // 알림톡 발송: 비즈고 연결(서버 + API Key)이 있으면 실제 발송, 없으면(데모) 기록만 (result 'MOCK')
   //   템플릿 코드·채널은 운영자(super) 알림톡연결 화면에서 업체·브랜드별로 — 승인된 코드가 없으면 보내지 않고 안내
+  //   알림톡은 따로 권한 없이 계약을 볼 수 있는 직원이면 누구나 보냄 (볼 수 없는 계약은 findContract 가 막음)
   async send({ contractId, template, templateKey, variables, buttons, target, brand, receiverName, receiverPhone, message }) {
-    const { db, user } = await authorize('notify.send');
-    findContract(db, user, contractId);
+    const { db, user } = await authorize('contract.view');
+    const contract = findReadableContract(db, user, contractId); // 볼 수 있는 계약이면 알림톡 발송 가능 (다른 사람 계약 포함)
     if (digitsOnly(receiverPhone).length < 10) throw new ApiError('수신자 연락처가 없습니다.');
     const tpl = ALIMTALK_TEMPLATES[templateKey];
     if (!tpl) throw new ApiError('알림톡 종류가 올바르지 않습니다.');
@@ -914,7 +1146,20 @@ export const notifications = {
     if (live && !code) throw new ApiError(`${brand} [${tpl.label}] 알림톡은 아직 비즈고 템플릿 코드가 없습니다. 운영자에게 승인된 템플릿 코드 등록을 요청해 주세요.`);
     // 템플릿에 있는 #{빈칸}만 골라 보냄
     const names = [...new Set([tpl.body, ...tpl.buttons.map((x) => x.url)].join(' ').match(/#\{[^}]+\}/g) || [])].map((x) => x.slice(2, -1));
-    const vars = variables && typeof variables === 'object' ? variables : {};
+    const vars = { ...(variables && typeof variables === 'object' ? variables : {}) };
+    // 버튼 링크 값 #{ecode}: 화면이 보낸 값이 비었거나 이 계약 것이 아니면 서버가 채움 (빈 링크 /e/?q= 로 나가지 않게)
+    //   /e/?q= 와 /업체/c/?q= 는 서명 링크 값·고객확인페이지 값 어느 쪽이든 열림 (bundleByToken, customerApp.linkLogin)
+    if (names.includes('ecode')) {
+      const given = String(vars.ecode || '').trim();
+      const mine = [contract.customerToken, contract.esign?.token, ...(contract.esign?.pastTokens || [])].filter(Boolean);
+      if (!given || !mine.includes(given)) {
+        if (templateKey === '서명요청' && contract.esign?.token) vars.ecode = contract.esign.token;
+        else {
+          if (!contract.customerToken) contract.customerToken = newToken();
+          vars.ecode = contract.customerToken;
+        }
+      }
+    }
     const replaceWords = Object.fromEntries(names.map((k) => [k, String(vars[k] ?? '').slice(0, 500)]));
     const log = {
       id: nextId(db, 'notifications'),
@@ -924,7 +1169,7 @@ export const notifications = {
       templateKey,
       templateCode: code,
       variables: replaceWords,
-      buttons: Array.isArray(buttons) ? buttons.slice(0, 5) : [],
+      buttons: Array.isArray(buttons) ? buttons.slice(0, 5).map((b) => ({ ...b, url: String(b?.url || '').replace(/([?&]q=)(?=$|&)/, `$1${replaceWords.ecode || ''}`) })) : [],
       target,
       brand,
       receiverName,
@@ -1021,7 +1266,7 @@ export const notifications = {
   },
 
   async history(contractId) {
-    const { db, user } = await authorize('notify.send');
+    const { db, user } = await authorize('contract.view');
     return clone(db.notifications.filter((n) => n.companyId === user.companyId && n.contractId === contractId));
   },
 };
@@ -1101,7 +1346,12 @@ export const customerApp = {
   // 알림톡 링크 (/{업체}/c/{고유값}) — 계약의 고객으로 바로 로그인
   async linkLogin(token) {
     const db = await loadDb();
-    const c = token ? db.contracts.find((x) => x.customerToken === String(token) && !x.deletedAt) : null;
+    // 고객확인페이지 값, 또는 서명 링크 값(지금·예전)으로도 들어올 수 있게 (알림톡 #{ecode} 가 어느 값이든 열림)
+    const t = String(token || '');
+    const c = t
+      ? db.contracts.find((x) => !x.deletedAt && x.customerToken === t) ||
+        db.contracts.find((x) => !x.deletedAt && (x.esign?.token === t || (x.esign?.pastTokens || []).includes(t)))
+      : null;
     if (!c) throw new ApiError('유효하지 않은 링크입니다. 이름과 휴대폰번호로 로그인해 주세요.', 'NOT_FOUND');
     const company = db.companies.find((x) => x.id === c.companyId);
     if (!company || !company.active) throw new ApiError('사용이 정지된 업체입니다.');
@@ -1221,6 +1471,73 @@ function authorizeImport(ctx) {
   return ctx;
 }
 
+// 예전 프로그램 파일로 이미 가져온 계약의 시공일·기사·시공상태 맞추기 (바뀐 것이 있으면 true)
+//   회차마다 파일에 날짜나 기사가 있을 때만 바꿈 (파일이 비어 있으면 우리 쪽 입력 유지)
+//   기사 보고(모바일웹·시공 기록)는 그대로, 시공상태는 파일이 '미정'이 아닐 때만
+//   예전 번호로 잘못 맞춰졌던 계약(바로잡기 전)은 '정확히' 파일대로: 파일이 비어 있는 회차는 비우고, 시공상태도 '미정'까지 파일대로
+const OLD_SYNC_MARK = '기존 프로그램 파일로 일정 맞춤'; // 예전 번호로 찾던 때의 기록 (잘못 맞춰졌을 수 있음)
+const SYNC_MARK = '기존 프로그램 파일 일정 반영';
+const FIX_MARK = '기존 프로그램 파일로 일정 바로잡음';
+function needsRepair(c) {
+  const h = (c.history || []).map((x) => x.action || '');
+  const last = h.findLastIndex((a) => a.startsWith(OLD_SYNC_MARK));
+  return last >= 0 && !h.slice(last + 1).some((a) => a.startsWith(FIX_MARK));
+}
+function syncFromLegacy(db, user, c, r, engineerFor) {
+  const exact = needsRepair(c);
+  const changes = [];
+  const steps = [...(c.schedules || [])];
+  const fileSteps = r.schedules || [];
+  const count = exact ? Math.max(2, fileSteps.length) : fileSteps.length;
+  for (let i = 0; i < Math.min(count, MAX_SCHEDULE_STEPS); i++) {
+    const f = fileSteps[i] || { date: '', time: '', engineerName: '' };
+    if (!exact && !f.date && !f.engineerName) continue;
+    if (exact && !steps[i] && !f.date && !f.engineerName) continue;
+    const cur = steps[i] || { assignType: ASSIGN_TYPES.ENGINEER, engineerId: null, teamId: null, memo: '' };
+    const next = { ...cur };
+    // 파일에 시간이 없으면 우리 쪽 시간(직접 고른 '무관' 등)은 그대로 — 바로잡기일 때만 파일대로
+    if (exact) Object.assign(next, { date: f.date || '', time: f.time || '', ampm: f.time ? '' : f.ampm || '' });
+    else if (f.date) Object.assign(next, { date: f.date, ...(f.time || f.ampm ? { time: f.time || '', ampm: f.time ? '' : f.ampm } : {}) });
+    if (f.engineerName) Object.assign(next, { assignType: ASSIGN_TYPES.ENGINEER, engineerId: engineerFor(f.engineerName), teamId: null });
+    else if (exact) Object.assign(next, { assignType: ASSIGN_TYPES.ENGINEER, engineerId: null, teamId: null });
+    const label = `${i + 1}차`;
+    if ((cur.date || '') !== (next.date || '') || (cur.time || '') !== (next.time || '') || (cur.ampm || '') !== (next.ampm || '')) {
+      changes.push({ label: `시공일 ${label}`, from: [cur.date, cur.time].filter(Boolean).join(' ') || '-', to: [next.date, timeLabel(next)].filter(Boolean).join(' ') });
+    }
+    if ((cur.engineerId || null) !== (next.engineerId || null) || cur.assignType !== next.assignType) {
+      const nameOf = (id) => db.engineers.find((e) => e.id === id)?.name || '-';
+      changes.push({ label: `시공담당 ${label}`, from: nameOf(cur.engineerId), to: nameOf(next.engineerId) });
+    }
+    steps[i] = next;
+  }
+  if (r.status && WORK_STATUS.includes(r.status) && r.status !== c.status && (exact || r.status !== '미정')) {
+    changes.push({ label: '시공상태', from: c.status, to: r.status });
+    c.status = r.status;
+    if (r.status === '시공완료') c.completedDate = r.completedDate || c.completedDate || '';
+    if (r.status === '취소') Object.assign(c, { canceledDate: r.canceledDate || c.canceledDate || '', cancelReason: c.cancelReason || r.cancelReason || '' });
+    if (exact && r.status !== '시공완료') c.completedDate = '';
+    if (exact && r.status !== '취소') Object.assign(c, { canceledDate: '', cancelReason: c.cancelReason === '기존 프로그램에서 취소' ? '' : c.cancelReason || '' });
+  }
+  if (!changes.length && !exact) return false;
+  c.schedules = steps;
+  addHistory(c, user, `${exact ? FIX_MARK : SYNC_MARK} (예전 번호 ${c.legacyNo})`, changes);
+  return true;
+}
+
+
+// 가져오기로만 생기고 아무 작업도 안 한 계약인지 (중복 정리 대상)
+const IMPORT_ONLY = /^(기존 프로그램에서 가져옴|기존 프로그램 파일)/;
+function importOnly(db, c) {
+  return (
+    (c.history || []).every((h) => IMPORT_ONLY.test(h.action || '')) &&
+    (c.esign?.status || ESIGN_STATUS.NONE) === ESIGN_STATUS.NONE &&
+    !c.paperPhotoCount &&
+    !(c.notes || []).length &&
+    (c.payments || []).every((p) => p.memo === '기존 프로그램 입금액') &&
+    !(c.schedules || []).some((s) => s.mobileStatus || s.workRecord)
+  );
+}
+
 function newEngineer(db, user, { name, loginId = '', phone = '', categories }) {
   const cats = categories && categories.length ? categories : categoriesFromName(name);
   const e = {
@@ -1269,12 +1586,14 @@ export const imports = {
     return result;
   },
 
-  // 직원 계정 일괄 등록 (예전 프로그램 사용자 목록: 이름, 아이디, 비밀번호, 부서, 직급)
-  //   부서가 '시공팀'이면 기사모바일 계정 — 같은 아이디 또는 같은 이름의 기사에 아이디·비밀번호를 넣고, 없으면 기사로 새로 등록
+  // 직원 계정 일괄 등록 (예전 프로그램 사용자 목록: 이름, 아이디, 비밀번호, 부서, 직급[, 연락처])
+  //   부서가 '시공팀'이면 기사모바일 계정 — 같은 아이디 또는 같은 이름('줄)' 같은 머리글 빼고)의 기사에 아이디·비밀번호를 넣고, 없으면 기사로 새로 등록
+  //   연락처는 새 기사이거나 기사 연락처가 비어 있을 때만 넣음
   //   그 외는 실장 계정 (기본 권한, 권한은 관리자가 사용자관리에서 조정). 이미 있는 아이디는 건너뜀
-  async users(rows = []) {
+  //   resetPassword: 이미 있는 실장 계정(같은 업체)은 건너뛰지 않고 비밀번호만 바꿈 (관리자 계정은 바꾸지 않음)
+  async users(rows = [], { resetPassword = false } = {}) {
     const { db, user } = authorizeImport(await authorize());
-    const result = { created: 0, engineers: 0, skipped: 0, errors: [] };
+    const result = { created: 0, engineers: 0, updated: 0, skipped: 0, errors: [] };
     const bare = (n) => String(n || '').replace(/^[^)]*\)/, '').trim(); // '줄)김주하' → '김주하'
     for (const row of rows.slice(0, IMPORT_BATCH_MAX)) {
       const name = String(row.name || '').trim();
@@ -1282,6 +1601,7 @@ export const imports = {
       const password = String(row.password || '');
       const department = DEPARTMENTS.includes(String(row.department || '').trim()) ? String(row.department).trim() : '';
       const position = POSITIONS.includes(String(row.position || '').trim()) ? String(row.position).trim() : '';
+      const phone = digitsOnly(row.phone).length >= 10 && !/^0100000/.test(digitsOnly(row.phone)) ? String(row.phone).trim() : ''; // 010-0000-0000 같은 빈 번호는 버림
       const fail = (message) => result.errors.push({ name: name || loginId, message });
       if (!name || !loginId) {
         fail('이름 또는 아이디가 비어 있습니다.');
@@ -1299,12 +1619,12 @@ export const imports = {
       }
       if (department === '시공팀') {
         const mine = db.engineers.filter((e) => e.companyId === user.companyId);
-        let eng = mine.find((e) => e.loginId === loginId) || mine.find((e) => bare(e.name) === name); // 같은 이름 기사면 아이디를 목록 것으로
+        let eng = mine.find((e) => e.loginId === loginId) || mine.find((e) => bare(e.name) === bare(name)); // 같은 이름 기사면 아이디를 목록 것으로
         if (!eng && isLoginIdTaken(db, loginId, { kind: 'engineer' })) {
           result.skipped += 1;
           continue;
         }
-        if (!eng) eng = newEngineer(db, user, { name, loginId });
+        if (!eng) eng = newEngineer(db, user, { name, loginId, phone });
         else if (eng.loginId !== loginId) {
           if (isLoginIdTaken(db, loginId, { kind: 'engineer', exceptEngineerId: eng.id })) {
             result.skipped += 1;
@@ -1312,12 +1632,17 @@ export const imports = {
           }
           eng.loginId = loginId;
         }
+        if (phone && !eng.phone) eng.phone = formatPhone(phone);
         eng.passwordHash = await hashPassword(password);
         result.engineers += 1;
         continue;
       }
       if (isLoginIdTaken(db, loginId, { kind: 'user' })) {
-        result.skipped += 1;
+        const existing = db.users.find((u) => u.loginId === loginId);
+        if (resetPassword && existing.companyId === user.companyId && existing.role === ROLES.MANAGER) {
+          existing.passwordHash = await hashPassword(password);
+          result.updated += 1;
+        } else result.skipped += 1;
         continue;
       }
       db.users.push({
@@ -1344,15 +1669,106 @@ export const imports = {
     return result;
   },
 
-  async contracts(rows = []) {
+  // 상품 일괄 등록 (예전 프로그램 상품 목록: 상품명, 구분, 품목, 상세품목, 노출여부)
+  //   같은 상품명·상세품목이 이미 있으면 건너뜀 (다시 올려도 중복 없음). 가격은 없어서 0 — [상품관리]에서 입력
+  //   품목이 비어 있으면 상품명·상세품목으로 짐작 (코팅·오염방지 → 나노코팅, 청소, 탄성, 그 외 줄눈)
+  async products(rows = []) {
+    const { db, user } = authorizeImport(await authorize('settings.manage'));
+    const result = { created: 0, skipped: 0, errors: [] };
+    const key = (name, detail) => `${String(name).trim()}\u0000${String(detail || '').trim()}`;
+    const have = new Set(db.products.filter((p) => p.companyId === user.companyId).map((p) => key(p.name, p.detail)));
+    const guess = (text) => (/코팅|오염방지/.test(text) ? '나노코팅' : /청소/.test(text) ? '청소' : /탄성/.test(text) ? '탄성' : '줄눈');
+    for (const row of rows.slice(0, IMPORT_BATCH_MAX)) {
+      const name = String(row.name || '').trim();
+      const detail = String(row.detail || '').trim();
+      if (!name) continue;
+      if (have.has(key(name, detail))) {
+        result.skipped += 1;
+        continue;
+      }
+      const kind = PRODUCT_KINDS.includes(String(row.kind || '').trim()) ? String(row.kind).trim() : PRODUCT_KINDS[0];
+      const cat = String(row.category || '').trim();
+      const visible = !(row.visible === false || /^(n|no|아니오|숨김|비활성)$/i.test(String(row.visible ?? '').trim()));
+      db.products.push({
+        id: nextId(db, 'products'),
+        companyId: user.companyId,
+        createdAt: nowIso(),
+        name,
+        kind,
+        category: CATEGORIES.includes(cat) ? cat : guess(`${name} ${detail}`),
+        detail,
+        freeDetail: String(row.freeDetail || '').trim(),
+        price: Math.max(0, Number(String(row.price ?? '').replace(/[^\d.]/g, '')) || 0),
+        visible,
+      });
+      have.add(key(name, detail));
+      result.created += 1;
+    }
+    saveDb(db);
+    return result;
+  },
+
+  // 가져오기 뒤 중복 정리: counts = { 계약 열쇠: 파일에 있는 수 } — 우리 쪽이 더 많으면
+  //   가져오기로만 생기고 아무 작업도 안 한 나중 계약을 휴지통으로 (되살리기 가능)
+  async contractDuplicates(counts = {}) {
+    const { db, user } = authorizeImport(await authorize('contract.create'));
+    const groups = new Map();
+    db.contracts
+      .filter((c) => c.companyId === user.companyId && c.legacyNo && !c.deletedAt)
+      .forEach((c) => {
+        const k = legacyKeys(c)[0];
+        if (counts[k]) groups.set(k, [...(groups.get(k) || []), c]);
+      });
+    let trashed = 0;
+    groups.forEach((list, k) => {
+      let extra = list.length - Number(counts[k] || 0);
+      if (extra <= 0) return;
+      for (const c of [...list].sort((a, b) => b.id - a.id)) {
+        if (extra <= 0) break;
+        if (!importOnly(db, c)) continue;
+        c.deletedAt = nowIso();
+        addHistory(c, user, '가져오기 중복 정리 (같은 계약이 두 번 들어와 휴지통으로)');
+        extra -= 1;
+        trashed += 1;
+      }
+    });
+    if (trashed) {
+      invalidateNumbers(db);
+      saveDb(db);
+    }
+    return { trashed };
+  },
+
+  //   options.sync: 이미 가져온 계약도 시공일·기사·시공상태를 파일대로 맞춤 (그 밖의 항목은 그대로)
+  async contracts(rows = [], options = {}) {
     const { db, user } = authorizeImport(await authorize('contract.create'));
     const company = db.companies.find((c) => c.id === user.companyId);
-    const result = { created: 0, skipped: 0, errors: [], newEngineers: [], newBrands: [] };
-    const done = new Set(db.contracts.filter((c) => c.companyId === user.companyId && c.legacyNo).map((c) => String(c.legacyNo)));
+    const result = { created: 0, skipped: 0, updated: 0, errors: [], newEngineers: [], newBrands: [] };
+    // 이미 가져온 계약 찾기 — 예전 프로그램 '번호'는 목록 줄 번호라 예전에서 계약을 지우면 당겨짐 (번호로 찾으면 다른 계약이 됨)
+    //   그래서 계약일·구분·연락처·고객명·현장(아파트·동·호)으로 찾고, 못 찾으면 계약일·구분·연락처로 한 번 더
+    const imported = db.contracts.filter((c) => c.companyId === user.companyId && c.legacyNo);
+    const pools = [new Map(), new Map()];
+    imported.forEach((c) => legacyKeys(c).forEach((k, i) => pools[i].set(k, [...(pools[i].get(k) || []), c])));
+    const used = new Set();
+    const findExisting = (r) => {
+      const ks = legacyKeys(r);
+      for (let i = 0; i < ks.length; i++) {
+        // 휴지통에 있는 것보다 살아 있는 계약 먼저, 그다음 먼저 만든 계약
+        const c = (pools[i].get(ks[i]) || []).filter((x) => !used.has(x.id)).sort((a, b) => !!a.deletedAt - !!b.deletedAt || a.id - b.id)[0];
+        if (c) {
+          used.add(c.id);
+          return c;
+        }
+      }
+      return null;
+    };
+    // 기사 찾기: 같은 이름 → 없으면 앞 표시('청)', '줄)' 등)와 띄어쓰기를 빼고 같은 이름 (중복 기사가 생기지 않게)
+    const bare = (s) => String(s || '').replace(/^[가-힣,]+\)\s*/, '').replace(/\s+/g, '');
     const engineerFor = (name) => {
       const n = String(name || '').trim();
       if (!n) return null;
-      let e = db.engineers.find((x) => x.companyId === user.companyId && x.name === n);
+      const mine = db.engineers.filter((x) => x.companyId === user.companyId);
+      let e = mine.find((x) => x.name === n) || (bare(n) ? mine.filter((x) => bare(x.name) === bare(n)) : []).find((x, _, all) => all.length === 1);
       if (!e) {
         e = newEngineer(db, user, { name: n });
         result.newEngineers.push(n);
@@ -1362,8 +1778,11 @@ export const imports = {
 
     rows.slice(0, IMPORT_BATCH_MAX).forEach((r) => {
       const key = String(r.legacyNo || '').trim();
-      if (key && done.has(key)) {
-        result.skipped += 1;
+      const existing = findExisting(r);
+      if (existing) {
+        if (key) existing.legacyNo = key; // 지금 파일의 번호로
+        if (options.sync && !existing.deletedAt && syncFromLegacy(db, user, existing, r, engineerFor)) result.updated += 1;
+        else result.skipped += 1;
         return;
       }
       try {
@@ -1380,7 +1799,7 @@ export const imports = {
           input.totalAmount = (Number(input.discount) || 0) + (Number(input.voucher) || 0);
         }
         const fields = normalizeContractInput(db, user, input, null);
-        const cust = upsertCustomerForContract(db, user, fields.customerName, fields.customerPhone, fields.customerPhone2);
+        const cust = upsertCustomerForContract(db, user, fields.customerName, fields.customerPhone, fields.customerPhone2, fields);
         const contract = {
           totalAmount: 0,
           discount: 0,
@@ -1400,7 +1819,8 @@ export const imports = {
         };
         addHistory(contract, user, `기존 프로그램에서 가져옴 (예전 번호 ${key || '-'})`);
         db.contracts.push(contract);
-        if (key) done.add(key);
+        used.add(contract.id); // 같은 요청 안에서 같은 줄이 또 오면 이 계약으로 (중복 생성 방지)
+        legacyKeys(contract).forEach((k, i) => pools[i].set(k, [...(pools[i].get(k) || []), contract]));
         result.created += 1;
       } catch (e) {
         result.errors.push({ legacyNo: key, customerName: r.customerName || '', message: e.message });

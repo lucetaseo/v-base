@@ -1123,28 +1123,6 @@ body {
   background: transparent;
 }
 
-/* 로그인 화면: 업체 사용 가능 기한 (30일 이내는 노란색, 만료는 빨간색) */
-.login-period {
-  display: inline-block;
-  margin: 8px 0 0;
-  padding: 4px 10px;
-  border-radius: 4px;
-  background: rgba(255, 255, 255, 0.18);
-  color: #fff;
-  font-size: 13px;
-  font-weight: 600;
-}
-
-.login-period.soon {
-  background: #fef3c7;
-  color: #92400e;
-}
-
-.login-period.expired {
-  background: #fff1f2;
-  color: #be123c;
-}
-
 /* 로그인 화면 구분: 일반화면 / 기사모바일 */
 .login-kind {
   display: inline-block;
@@ -4677,6 +4655,985 @@ input[type='month'] {
   justify-content: center;
 }
 
+/* 상단 [+ 계약 등록]: 링크 기본 글자색(inherit)에 덮이지 않게 흰 글씨 고정 */
+a.btn-quick.blue {
+  color: #fff;
+  font-size: 13px;
+  padding: 7px 16px;
+  border-radius: 4px;
+}
+a.btn-quick.blue:hover {
+  background: #155bb8;
+  border-color: #155bb8;
+}
+
+/* 데이터 가져오기 > 상품 목록 붙여넣기 칸 */
+.import-paste {
+  width: 100%;
+  box-sizing: border-box;
+  margin: 8px 0;
+  padding: 8px;
+  font-size: 13px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  resize: vertical;
+}
+
+/* 상담홈 (/업체주소/t 상담실장) — 태블릿에서 손가락으로 누르기 좋게 큼직하게 */
+.consult-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.consult-top h2 {
+  margin: 0;
+}
+.consult-new {
+  min-height: 52px;
+  padding: 0 28px;
+  font-size: 18px;
+  font-weight: 700;
+  color: #fff;
+  background: #1a6fe0;
+  border: none;
+  border-radius: 10px;
+  cursor: pointer;
+}
+.consult-search {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 52px;
+  padding: 0 16px;
+  font-size: 17px;
+  border: 1px solid #c8cdd5;
+  border-radius: 10px;
+}
+.consult-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 12px 0 16px;
+}
+.consult-filters button {
+  min-height: 42px;
+  padding: 0 18px;
+  font-size: 15px;
+  background: #fff;
+  border: 1px solid #c8cdd5;
+  border-radius: 21px;
+  cursor: pointer;
+}
+.consult-filters button.on {
+  color: #fff;
+  background: #333;
+  border-color: #333;
+}
+.consult-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 12px;
+}
+.consult-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 16px;
+  background: #fff;
+  border: 1px solid #dde1e7;
+  border-radius: 12px;
+  cursor: pointer;
+}
+.consult-card:active {
+  background: #f3f7fd;
+}
+.consult-card-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 18px;
+}
+.consult-chip {
+  padding: 2px 8px;
+  font-size: 13px;
+  color: #1a6fe0;
+  background: #e8f0fe;
+  border-radius: 10px;
+}
+.consult-card-site {
+  font-size: 15px;
+}
+.consult-card-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 6px;
+}
+.consult-card-actions a,
+.consult-card-actions button {
+  display: inline-flex;
+  align-items: center;
+  min-height: 42px;
+  padding: 0 14px;
+  font-size: 15px;
+  color: #333;
+  text-decoration: none;
+  background: #f5f6f8;
+  border: 1px solid #d5d9e0;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.consult-more {
+  margin-top: 12px;
+}
+/* 상담실장 화면에서는 입력칸·선택칸·탭을 크게 (태블릿 터치) */
+.consult-mode .page-card input.input-text,
+.consult-mode .page-card select,
+.consult-mode .page-card textarea {
+  min-height: 40px;
+  font-size: 15px;
+}
+.consult-mode .page-card input[type='radio'],
+.consult-mode .page-card input[type='checkbox'] {
+  width: 20px;
+  height: 20px;
+}
+.consult-mode .detail-tabs button {
+  min-height: 44px;
+  font-size: 15px;
+}
+
+/* 데이터 가져오기 > 직원 계정: 비밀번호만 바꾸기 선택 */
+.import-option {
+  display: block;
+  margin-top: 10px;
+  font-size: 14px;
+}
+
+/* 계약 목록 휴대폰 보기 전환: 자세히(카드) / 간단히(이름·아파트·금액 한 줄) — PC 에서는 늘 표 */
+.mobile-view-toggle,
+.contract-compact-list {
+  display: none;
+}
+@media screen and (max-width: 768px) {
+  .mobile-view-toggle {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 10px;
+    font-size: 13px;
+    color: #64748b;
+  }
+  .mobile-view-toggle span {
+    margin-right: 4px;
+  }
+  .mobile-view-toggle button {
+    padding: 6px 14px;
+    font-size: 13px;
+    background: #fff;
+    border: 1px solid #cbd5e1;
+    border-radius: 16px;
+    cursor: pointer;
+  }
+  .mobile-view-toggle button.on {
+    color: #fff;
+    background: #1a6fe0;
+    border-color: #1a6fe0;
+  }
+  .view-compact .contract-table-container {
+    display: none;
+  }
+  .view-compact .contract-compact-list {
+    display: block;
+    border: 1px solid #cbd5e1;
+    border-radius: 8px;
+    overflow: hidden;
+    background: #fff;
+  }
+  .cc-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 12px;
+    font-size: 14px;
+    text-align: left;
+    background: #fff;
+    border: none;
+    border-bottom: 1px solid #e2e8f0;
+    cursor: pointer;
+  }
+  .cc-row:last-child {
+    border-bottom: none;
+  }
+  .cc-row:active {
+    background: #f1f5f9;
+  }
+  .cc-name {
+    flex-shrink: 0;
+    font-weight: 700;
+  }
+  .cc-site {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    color: #475569;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+  .cc-amount {
+    flex-shrink: 0;
+    font-weight: 600;
+  }
+}
+
+/* 계약 상세: AS관리로 보낸 시공 표시 */
+.as-chip {
+  display: inline-block;
+  margin-top: 2px;
+  padding: 1px 6px;
+  font-size: 11px;
+  color: #b45309;
+  background: #fef3c7;
+  border-radius: 8px;
+}
+.as-request {
+  margin-top: 2px;
+  font-size: 12px;
+  color: #b45309;
+  white-space: pre-wrap;
+}
+.as-request.done {
+  color: #94a3b8;
+}
+/* AS관리 목록: 전체 / 처리중 / 완료 */
+.as-filter {
+  display: inline-flex;
+  gap: 6px;
+  margin-left: 12px;
+}
+.as-filter button {
+  padding: 4px 12px;
+  font-size: 13px;
+  background: #fff;
+  border: 1px solid #cbd5e1;
+  border-radius: 14px;
+  cursor: pointer;
+}
+.as-filter button.on {
+  color: #fff;
+  background: #b45309;
+  border-color: #b45309;
+}
+
+/* 계약 등록: [+ 시공 추가] 줄과 추가 시공 제목 */
+.add-work-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin: 14px 0 6px;
+}
+.extra-work-title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.extra-work-title .btn-text-danger {
+  font-size: 13px;
+}
+
+/* 계약 등록: 상품 고르기 [패키지] [추가시공품목] */
+.product-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.product-pick-label {
+  display: inline-block;
+  min-width: 84px;
+  font-weight: 600;
+  font-size: 13px;
+}
+.product-picker .text-orange {
+  color: #e8590c;
+}
+
+/* 사진 썸네일 아래 '크게 보기' 안내 (누르면 크게 보임) — 글씨는 눌러도 사진이 눌림 */
+.paper-thumb::after,
+.pay-thumb::after {
+  content: '🔍 크게 보기';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 2px 0;
+  font-size: 11px;
+  line-height: 1.3;
+  text-align: center;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.55);
+  pointer-events: none;
+}
+.pay-thumb::after {
+  content: '크게';
+  font-size: 9px;
+  padding: 0;
+}
+.product-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-bottom: 8px;
+  border-bottom: 1px dashed #e2e8f0;
+}
+
+/* 시공선택: 상품 이름 검색 (치면 아래에 맞는 상품, 누르면 추가) */
+.product-search {
+  position: relative;
+  display: inline-block;
+}
+.product-search .input-text {
+  width: 180px;
+}
+.product-search-list {
+  position: absolute;
+  z-index: 20;
+  top: 100%;
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  min-width: 320px;
+  max-width: 90vw;
+  max-height: 280px;
+  overflow-y: auto;
+  margin-top: 2px;
+  background: #fff;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+}
+.product-search-list button {
+  padding: 8px 10px;
+  font-size: 13px;
+  text-align: left;
+  background: #fff;
+  border: none;
+  border-bottom: 1px solid #f1f5f9;
+  cursor: pointer;
+}
+.product-search-list button:hover {
+  background: #eef4fd;
+}
+.product-search-empty {
+  padding: 8px 10px;
+  font-size: 13px;
+  color: #94a3b8;
+}
+/* 상품 줄: 상품명 비었을 때 표시, 상세품목 줄바꿈 */
+.input-missing {
+  border-color: #e8590c !important;
+  background: #fff7ed;
+}
+.line-items .line-detail {
+  font-family: inherit;
+  min-height: 34px;
+  resize: vertical;
+  white-space: pre-wrap;
+}
+.line-items .money-input .input-text {
+  width: 110px;
+}
+
+/* 계약 상세·기사 화면의 패키지 / 추가시공품목 — 모두 진하게 (상세품목도 흐리지 않게) */
+.line-items-strong {
+  font-weight: 700;
+  color: #111;
+}
+.line-items-strong .line-detail-text {
+  font-weight: 700;
+  color: #111;
+}
+
+/* 로그인 화면: 사용 가능 기간 (업체 이용기간) */
+.login-period {
+  margin: 10px 0 0;
+  display: inline-block;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.15);
+  font-size: 13px;
+}
+.login-period b {
+  white-space: nowrap;
+}
+.login-period.soon {
+  background: #fff3cd;
+  color: #7a4f00;
+}
+.login-period.expired {
+  background: #ffe1e1;
+  color: #b00020;
+}
+
+/* 계약 등록 '시공정보': PC는 그대로, 휴대폰·태블릿에서는 접어 두고 제목을 누르면 펼침
+   태블릿 = 화면 폭 1100px 이하이거나 손가락 터치가 주 입력인 기기 (가로로 돌린 큰 태블릿 포함) */
+.fold-mobile-btn {
+  all: unset;
+  font: inherit;
+  cursor: default;
+}
+.fold-mobile-hint {
+  display: none;
+}
+/* 휴대폰·태블릿에서만 보이는 접기 제목 (추가 시공 일정) */
+.fold-touch-only {
+  display: none;
+}
+@media screen and (max-width: 1100px), screen and (pointer: coarse) {
+  .fold-mobile-btn {
+    cursor: pointer;
+    display: flex;
+    width: 100%;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .fold-mobile-hint {
+    display: inline;
+    font-size: 13px;
+    font-weight: 600;
+    color: #1a6fe0;
+  }
+  .fold-touch-only {
+    display: block;
+    margin: 10px 0 6px;
+    padding: 8px 10px;
+    font-size: 14px;
+    background: #f1f6fd;
+    border-radius: 6px;
+  }
+  .form-grid-table.fold-mobile:not(.open) {
+    display: none;
+  }
+}
+
+/* 계약 등록 현장 칸: '[ ] 동 [ ] 호  타입 [ ]  평 [ ]' — 이름표와 칸이 떨어지지 않게 */
+.field-pair {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+.field-pair.labeled {
+  margin-left: 8px;
+}
+
+/* 계약 등록 상품 줄 — 휴대폰: 표 대신 카드처럼 (상품명·상세품목을 한 줄 전체로, 금액·삭제는 그 아래) */
+@media screen and (max-width: 768px) {
+  .product-group .line-items {
+    display: block;
+    overflow: visible;
+  }
+  .product-group .line-items thead {
+    display: none;
+  }
+  .product-group .line-items tbody,
+  .product-group .line-items tr,
+  .product-group .line-items td {
+    display: block;
+    width: 100%;
+    box-sizing: border-box;
+  }
+  .product-group .line-items tr {
+    border: 1px solid #dce1e8;
+    border-radius: 8px;
+    padding: 8px 10px;
+    margin: 8px 0;
+    background: #fff;
+  }
+  .product-group .line-items td {
+    border: 0;
+    padding: 3px 0;
+  }
+  .product-group .line-items td[data-label]::before {
+    content: attr(data-label);
+    display: block;
+    font-size: 12px;
+    font-weight: 600;
+    color: #555;
+    margin-bottom: 2px;
+  }
+  /* 상세품목은 글 길이만큼 칸이 늘어남 (전부 보이게) */
+  .product-group .line-items .line-detail {
+    min-height: 60px;
+    field-sizing: content;
+    max-height: none;
+  }
+  .product-group .line-items td.line-price {
+    display: inline-block;
+    width: auto;
+  }
+  .product-group .line-items td.line-delete {
+    display: inline-block;
+    width: auto;
+    float: right;
+    margin-top: 22px;
+  }
+}
+
+/* 계약 등록 직후 현장 서명 (화면 전체) */
+.onsite-sign {
+  position: fixed;
+  inset: 0;
+  z-index: 900;
+  background: #eef2f7;
+  display: flex;
+  flex-direction: column;
+}
+.onsite-sign-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 14px;
+  background: #1a6fe0;
+  color: #fff;
+}
+.onsite-sign-actions {
+  display: flex;
+  gap: 6px;
+}
+.onsite-sign-body {
+  flex: 1;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* 기사 모바일: 시공완료 때 시공 범위 체크 */
+.scope-check {
+  margin-top: 8px;
+  padding: 10px;
+  border: 1px solid #cfe0f7;
+  border-radius: 8px;
+  background: #f5f9ff;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.scope-check-title {
+  font-weight: 700;
+}
+.scope-group-name {
+  font-weight: 700;
+  font-size: 13px;
+  margin-top: 4px;
+}
+.scope-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 6px 4px;
+  font-size: 15px;
+  line-height: 1.35;
+}
+.scope-item input {
+  width: 20px;
+  height: 20px;
+  flex: none;
+  margin-top: 1px;
+}
+.scope-item.undone {
+  color: #c62828;
+  text-decoration: line-through;
+}
+
+/* 사무실 화면: 기사 시공 기록 (누가·언제·완료·미시공·자재) */
+.work-record {
+  margin-top: 6px;
+  padding: 6px 8px;
+  border-left: 3px solid #1a6fe0;
+  background: #f5f9ff;
+  font-size: 12px;
+  line-height: 1.5;
+  text-align: left;
+}
+.work-record-head {
+  font-weight: 700;
+}
+.work-record-head span {
+  font-weight: 400;
+  color: #555;
+  margin-left: 4px;
+}
+.work-record b {
+  margin-right: 4px;
+}
+.scope-check .scope-note {
+  font-family: inherit;
+  font-size: 15px;
+  resize: vertical;
+}
+.work-record.summary {
+  border-left-width: 3px;
+  padding: 4px 8px;
+}
+.work-record-more {
+  margin-left: 6px;
+  font-size: 12px;
+  padding: 0;
+  background: none;
+  border: 0;
+  color: #1a6fe0;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.work-record-items {
+  margin: 2px 0 2px 16px;
+  padding: 0;
+}
+.work-record-meta {
+  color: #1a6fe0;
+}
+/* 기사 모바일: 항목별 자재·작업자 칸 */
+.scope-row {
+  padding: 4px 0;
+  border-bottom: 1px dashed #dce6f3;
+}
+.scope-row.undone .scope-item {
+  color: #c62828;
+  text-decoration: line-through;
+}
+.scope-row-fields {
+  display: flex;
+  gap: 6px;
+  margin: 2px 0 4px 28px;
+}
+.scope-row-fields .input-text {
+  flex: 1;
+  min-width: 0;
+  font-size: 14px;
+}
+
+/* 기사 모바일: 자재(고르기) + 번호 + 작업자 */
+.scope-row-fields {
+  flex-wrap: wrap;
+}
+.scope-row-fields .mat {
+  flex: 2 1 55%;
+}
+.scope-row-fields .num {
+  flex: 1 1 20%;
+  max-width: 90px;
+}
+.scope-row-fields .worker {
+  flex: 1 1 100%;
+}
+.scope-common {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.scope-common .scope-row-fields {
+  margin-left: 0;
+}
+.consult-switch .login-form button.consult-switch-back {
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.7);
+  color: #fff;
+}
+
+/* 일정관리: 글씨를 더 진하고 크게 (잘 보이게) */
+.calendar-cell .schedule-badge {
+  color: #111;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.45;
+  letter-spacing: -0.2px;
+}
+.calendar-cell .schedule-badge.unassigned {
+  color: #d1123f;
+  font-weight: 800;
+}
+.calendar-cell .day-total {
+  font-size: 12px;
+  font-weight: 700;
+  color: #0b57c5;
+}
+.calendar-cell .off-box {
+  font-size: 12px;
+  font-weight: 600;
+}
+.calendar-cell .off-box-title {
+  font-size: 11.5px;
+  opacity: 1;
+}
+.schedule-detail-table {
+  font-size: 13px;
+}
+.schedule-detail-table td {
+  color: #111;
+}
+.schedule-detail-table td .sub-text {
+  color: #444;
+}
+.day-off-list {
+  color: #111;
+}
+@media screen and (max-width: 768px) {
+  .calendar-cell .schedule-badge,
+  .calendar-cell .off-box {
+    font-size: 11px;
+  }
+}
+
+/* 일정관리 달력: 오늘 날짜 표시 (연한 노란 바탕 + 날짜 동그라미 + '오늘') */
+.calendar-cell.today-cell {
+  background-color: #fffbe6;
+  box-shadow: inset 0 0 0 2px #f5c518;
+}
+.calendar-cell.today-cell .day-number > :first-child,
+.calendar-cell.today-cell .day-number {
+  color: inherit;
+}
+.calendar-cell.today-cell .today-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 4px;
+  border-radius: 11px;
+  background: #1a6fe0;
+  color: #fff;
+  font-weight: 800;
+}
+.calendar-cell .today-label {
+  margin-left: 4px;
+  font-size: 11px;
+  font-weight: 800;
+  color: #b45309;
+}
+
+/* 화면 오류 안내 (ErrorBoundary) */
+.error-card {
+  margin: 16px auto;
+  max-width: 560px;
+  word-break: break-all;
+}
+
+/* AS 회차의 사진 보기 버튼 */
+.as-photo-btn {
+  margin-left: 6px;
+  vertical-align: middle;
+}
+
+/* ---------- 박람회 일정 (초록색) ---------- */
+.btn-quick.green {
+  background: #15803d;
+  border-color: #15803d;
+  color: #fff;
+  font-weight: bold;
+  margin-left: 6px;
+}
+.btn-quick.green:hover { background: #166534; }
+.fair-box {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 4px;
+  align-items: center;
+  background: #dcfce7;
+  border: 1px solid #86efac;
+  border-radius: 4px;
+  padding: 1px 4px;
+  margin: 2px 0;
+  font-size: 11px;
+  line-height: 1.4;
+}
+.fair-box-title {
+  background: #15803d;
+  color: #fff;
+  border-radius: 3px;
+  padding: 0 4px;
+  font-weight: bold;
+}
+.fair-name,
+.fair-names {
+  color: #15803d;
+  font-weight: bold;
+}
+.day-fair-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+.day-fair-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  border-radius: 6px;
+  padding: 6px 10px;
+}
+.fair-chip {
+  background: #15803d;
+  color: #fff;
+  border-radius: 4px;
+  padding: 1px 6px;
+  font-size: 12px;
+  font-weight: bold;
+}
+.btn-excel-download.fair-add { background: #15803d; border-color: #15803d; color: #fff; }
+.fair-staff {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.fair-staff-chip {
+  border: 1px solid #d1d5db;
+  border-radius: 16px;
+  padding: 4px 10px;
+  cursor: pointer;
+  font-size: 13px;
+}
+.fair-staff-chip.on {
+  border-color: #15803d;
+  background: #dcfce7;
+  color: #15803d;
+  font-weight: bold;
+}
+.fair-upcoming {
+  margin-top: 14px;
+  border-top: 1px solid #e5e7eb;
+  padding-top: 10px;
+}
+.fair-upcoming h4 { margin: 0 0 6px; font-size: 14px; }
+.fair-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  padding: 6px 4px;
+  border-bottom: 1px dashed #e5e7eb;
+  font-size: 13px;
+}
+.fair-row.editing { background: #f0fdf4; }
+.fair-row .fair-date { white-space: nowrap; font-weight: bold; }
+.fair-row .fair-place { flex: 1; min-width: 140px; }
+.fair-row .fair-actions { margin-left: auto; white-space: nowrap; }
+.fair-chip.mini { font-size: 10px; padding: 0 4px; display: inline-block; margin-top: 2px; }
+.fair-picked { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.fair-picked li { display: flex; align-items: center; justify-content: space-between; gap: 8px; background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 6px; padding: 4px 10px; max-width: 360px; }
+
+/* 새 버전 안내 띠 (utils/updateCheck.js) */
+.update-banner {
+  position: fixed;
+  left: 0;
+  right: 0;
+  top: 0;
+  z-index: 9999;
+  background: #1a6fe0;
+  color: #fff;
+  text-align: center;
+  padding: 10px 12px;
+  font-size: 14px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+.update-banner button {
+  background: #fff;
+  color: #1a6fe0;
+  border: 0;
+  border-radius: 4px;
+  padding: 3px 10px;
+  margin: 0 4px;
+  font-weight: bold;
+  cursor: pointer;
+}
+
+/* 상세시공 알림톡: 더스타트 버튼은 [박람회 일정 등록]과 같은 초록색 */
+.btn-talk-sm.brand-start {
+  background: #15803d;
+  border-color: #15803d;
+  color: #fff;
+}
+.btn-talk-sm.brand-start:hover { background: #166534; border-color: #166534; }
+
+/* 사진 고르기 팝업 (웨일: 사진 찍기 / 앨범에서 선택) */
+.photo-choice-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  z-index: 3000;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+.photo-choice {
+  background: #fff;
+  width: 100%;
+  max-width: 480px;
+  border-radius: 14px 14px 0 0;
+  padding: 14px 14px calc(14px + env(safe-area-inset-bottom));
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.photo-choice-btn,
+.photo-choice-cancel {
+  display: block;
+  text-align: center;
+  padding: 14px;
+  border-radius: 10px;
+  font-size: 16px;
+  font-weight: bold;
+  cursor: pointer;
+  border: 1px solid #d1d5db;
+  background: #f8fafc;
+  color: #111827;
+}
+.photo-choice-cancel { background: #fff; color: #6b7280; font-weight: normal; }
+button.receipt-add,
+button.btn-pay-photo,
+button.paper-add { font: inherit; }
+
+/* 검색 목록(아파트·기사): 휴대폰·태블릿에서 손가락으로 위아래로 넘기기 */
+.apt-suggest,
+.eng-picker-list {
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
+}
+
+/* 계약 상세: 탭 옆 [수정] */
+.detail-tabs button.detail-edit-btn {
+  background: #1a6fe0;
+  border-color: #1a6fe0;
+  color: #fff;
+  font-weight: bold;
+}
+.detail-tabs button.detail-edit-btn:hover { background: #155bc0; }
+.sign-here-box {
+  margin: 14px 0 6px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+/* 휴대폰 번호 세 칸 [010]-[0000]-[0000] (계약 등록) */
+.phone-input { display: inline-flex; align-items: center; gap: 6px; flex-wrap: nowrap; }
+.phone-input .input-text.phone-part { width: 84px; min-width: 0; text-align: center; letter-spacing: 1px; }
+.phone-input .input-text.phone-part.head { width: 64px; }
+.phone-input .phone-dash { color: #888; }
+@media (max-width: 480px) {
+  .phone-input .input-text.phone-part { width: 70px; }
+  .phone-input .input-text.phone-part.head { width: 56px; }
+}
+
 /* 통계정보 > 매입관리: 입력 줄 */
 .purchase-form {
   display: grid;
@@ -5036,9 +5993,4 @@ a.import-no:hover {
   font-size: 14px;
   font-weight: 700;
   cursor: pointer;
-}
-
-/* 계약 등록 현장 줄: '타입 [ ] 평 [ ]' 묶음 사이 간격 */
-.field-pair {
-  margin-left: 10px;
 }

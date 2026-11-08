@@ -24,13 +24,14 @@ import {
   companyOf,
   nowIso,
   session,
-  visibleContracts,
+  readableContracts,
 } from './core.js';
 import { addHistory, assigneeOf, contractView } from './views.js';
+import { ROLES, can } from '../auth/permissions.js';
 import { numberOf } from './numbering.js';
 import { DEFAULT_SCHEDULE_SETTINGS, MOBILE_STATUS, OFF_LABEL } from '../constants.js';
 import { inRange, isDateKey, today } from '../utils/date.js';
-import { calcAmounts } from '../utils/contract.js';
+import { calcAmounts, materialText, scopeOf, timeLabel } from '../utils/contract.js';
 import { formatAddress } from '../utils/format.js';
 
 export const settingsOf = (company) => ({ ...DEFAULT_SCHEDULE_SETTINGS, ...(company?.scheduleSettings || {}) });
@@ -132,7 +133,7 @@ function setOff(db, companyId, engineerId, { date, period, reason }, actor) {
   );
   if (conflicts.length) {
     const list = conflicts
-      .map(({ c, s }) => `· No.${numberOf(db, c)} ${c.customerName} ${s.time || (s.ampm === 'AM' ? '오전' : s.ampm === 'PM' ? '오후' : '시간미정')}`)
+      .map(({ c, s }) => `· No.${numberOf(db, c)} ${c.customerName} ${timeLabel(s) || '시간미정'}`)
       .join('\n');
     throw new ApiError(
       `${engineer.name} 기사는 ${date} ${OFF_LABEL[period]} 시간대에 배정된 일정이 있어 휴무를 등록할 수 없습니다.\n${list}\n일정을 다른 기사/날짜로 옮긴 후 다시 등록해 주세요.`,
@@ -153,7 +154,7 @@ function setOff(db, companyId, engineerId, { date, period, reason }, actor) {
     );
     if (teamConflicts.length) {
       const team = db.teams.find((t) => t.id === engineer.teamId);
-      const list = teamConflicts.map(({ c, s }) => `· No.${numberOf(db, c)} ${c.customerName} ${s.time || (s.ampm === 'AM' ? '오전' : s.ampm === 'PM' ? '오후' : '시간미정')}`).join('\n');
+      const list = teamConflicts.map(({ c, s }) => `· No.${numberOf(db, c)} ${c.customerName} ${timeLabel(s) || '시간미정'}`).join('\n');
       throw new ApiError(
         `${engineer.name} 기사까지 휴무하면 ${team?.name || '소속 팀'} 팀원 전원이 쉬게 되어, 배정된 팀 일정을 진행할 수 없습니다.\n${list}\n일정을 옮기거나 다른 팀원과 조정해 주세요.`,
       );
@@ -230,7 +231,7 @@ export const schedules = {
     const { db, user } = await authorize('schedule.view');
     const engineer = engineerId && engineerId !== 'none' ? db.engineers.find((e) => e.id === Number(engineerId)) : null;
     const out = [];
-    visibleContracts(db, user)
+    readableContracts(db, user) // 일정관리는 회사 전체 일정 (다른 사람 계약은 금액 가림·보기만)
       .filter((c) => !c.deletedAt)
       .filter((c) => (!category || c.category === category) && (!status || c.status === status))
       .forEach((c) => {
@@ -269,9 +270,90 @@ export const scheduleSettings = {
     if (![10, 15, 20, 30, 60].includes(interval)) throw new ApiError('시간 간격을 선택해 주세요.');
     const maxPerDay = Math.max(0, Math.floor(Number(data.maxPerDay) || 0));
     const company = companyOf(db, user);
-    company.scheduleSettings = { amEnd: data.amEnd, startTime: data.startTime, endTime: data.endTime, interval, maxPerDay };
+    // 시공 자재 목록: 한 줄에 하나, 같은 이름은 한 번만, 최대 100개
+    const materials = Array.isArray(data.materials)
+      ? [...new Set(data.materials.map((x) => String(x || '').trim().slice(0, 50)).filter(Boolean))].slice(0, 100)
+      : settingsOf(company).materials;
+    company.scheduleSettings = { amEnd: data.amEnd, startTime: data.startTime, endTime: data.endTime, interval, maxPerDay, materials };
     saveDb(db);
     return clone(company.scheduleSettings);
+  },
+};
+
+// ============================================================
+// 박람회 일정   (계약관리 위 [박람회 일정 등록] → 일정관리 달력에 초록색으로)
+//   업체 설정(company.fairs)에 보관: { id, date, endDate, name(박람회 이름), place(장소), staffIds(실장), engineerIds(기사), createdBy, createdAt }
+//   등록·수정·삭제: 관리자 또는 '박람회 일정 등록' 권한
+//   보기: 관리자·'박람회 일정' 권한 있는 실장은 전부 / 기사는 기사모바일에서 본인이 포함된 것만
+// ============================================================
+
+// 화면에 쓰는 한 줄 이름: '지제역 필해링턴 (수원)' — 이름 칸이 생기기 전 박람회는 장소 칸에 다 적혀 있음
+const fairLabel = (f) => (f.name ? (f.place ? `${f.name} (${f.place})` : f.name) : f.place || '');
+const fairView = (db, f) => ({
+  ...clone(f),
+  name: f.name || f.place || '',
+  place: f.name ? f.place || '' : '',
+  label: fairLabel(f),
+  staff: (f.staffIds || []).map((id) => db.users.find((u) => u.id === id)).filter(Boolean).map((u) => ({ id: u.id, name: u.name })),
+  engineers: (f.engineerIds || []).map((id) => db.engineers.find((e) => e.id === id)).filter(Boolean).map((e) => ({ id: e.id, name: e.name })),
+});
+const fairInRange = (f, from, to) => (!to || f.date <= to) && (!from || (f.endDate || f.date) >= from);
+const sortFairs = (a, b) => a.date.localeCompare(b.date) || a.id - b.id;
+
+export const fairs = {
+  // from~to 와 겹치는 박람회 (여러 날 박람회는 기간이 겹치면 포함) — 본인이 포함된 것만 (관리자는 전부)
+  async list({ from, to } = {}) {
+    const { db, user } = await authorizeAny(['schedule.view', 'fair.manage']);
+    // 관리자·'박람회 일정' 권한이 있는 실장은 전부 (등록·관리하는 사람), 그 외는 본인 포함·본인이 등록한 것만
+    const all = user.role === ROLES.ADMIN || can(user, 'fair.manage');
+    const mine = (f) => all || (f.staffIds || []).includes(user.id) || f.createdBy === user.id;
+    return (companyOf(db, user)?.fairs || [])
+      .filter((f) => mine(f) && fairInRange(f, from, to))
+      .sort(sortFairs)
+      .map((f) => fairView(db, f));
+  },
+
+  // 등록(id 없음) / 수정(id 있음)
+  async save(data = {}) {
+    const { db, user } = await authorize('fair.manage');
+    const company = companyOf(db, user);
+    const date = String(data.date || '');
+    const endDate = data.endDate ? String(data.endDate) : '';
+    if (!isDateKey(date)) throw new ApiError('박람회 날짜를 골라 주세요.');
+    if (endDate && (!isDateKey(endDate) || endDate < date)) throw new ApiError('끝나는 날짜는 시작 날짜와 같거나 뒤여야 합니다.');
+    let name = String(data.name || '').trim().slice(0, 60);
+    let place = String(data.place || '').trim().slice(0, 60);
+    if (!name && place) [name, place] = [place, '']; // 예전 화면(장소 한 칸)에서 보낸 경우
+    if (!name) throw new ApiError('박람회 이름을 적어 주세요. (예: 지제역 필해링턴)');
+    const staffIds = [...new Set((Array.isArray(data.staffIds) ? data.staffIds : []).map(Number))].filter((id) =>
+      db.users.some((u) => u.id === id && u.companyId === user.companyId && u.role !== ROLES.SUPER),
+    );
+    const engineerIds = [...new Set((Array.isArray(data.engineerIds) ? data.engineerIds : []).map(Number))].filter((id) =>
+      db.engineers.some((e) => e.id === id && e.companyId === user.companyId),
+    );
+    if (!staffIds.length && !engineerIds.length) throw new ApiError('박람회에 가는 기사를 한 명 이상 골라 주세요.');
+    company.fairs = company.fairs || [];
+    const fields = { date, endDate: endDate && endDate !== date ? endDate : '', name, place, staffIds, engineerIds, updatedAt: nowIso() };
+    let fair;
+    if (data.id) {
+      fair = company.fairs.find((f) => f.id === Number(data.id));
+      if (!fair) throw new ApiError('박람회 일정을 찾을 수 없습니다.', 'NOT_FOUND');
+      Object.assign(fair, fields);
+    } else {
+      fair = { id: Math.max(0, ...company.fairs.map((f) => f.id)) + 1, ...fields, createdBy: user.id, createdAt: nowIso() };
+      company.fairs.push(fair);
+    }
+    saveDb(db);
+    return fairView(db, fair);
+  },
+
+  async remove(id) {
+    const { db, user } = await authorize('fair.manage');
+    const company = companyOf(db, user);
+    const before = (company.fairs || []).length;
+    company.fairs = (company.fairs || []).filter((f) => f.id !== Number(id));
+    if (company.fairs.length === before) throw new ApiError('박람회 일정을 찾을 수 없습니다.', 'NOT_FOUND');
+    saveDb(db);
   },
 };
 
@@ -293,6 +375,8 @@ function mySchedule(db, me, c, s, stepIndex) {
     mobileStatus: s.mobileStatus || '',
     mobileMemo: s.mobileMemo || '',
     reportedAt: s.reportedAt,
+    scope: scopeOf(c), // 시공완료 보고 때 체크할 시공 범위
+    workRecord: s.workRecord || null,
     viaTeam: s.assignType === 'team',
     ...assigneeOf(db, s),
     category: c.category,
@@ -332,7 +416,7 @@ function engineerContractView(db, me, c) {
     area: c.area || '',
     address: formatAddress(c),
     moveInDate: c.moveInDate || '',
-    lineItems: (c.lineItems || []).map((l) => ({ name: l.name, detail: l.detail || '', qty: l.qty })),
+    lineItems: (c.lineItems || []).map((l) => ({ name: l.name, detail: l.detail || '', qty: l.qty, ...(l.kind ? { kind: l.kind } : {}) })),
     items: c.items || '',
     customerNote: c.customerNote || '',
     engineerNote: c.engineerNote || '',
@@ -349,6 +433,7 @@ function engineerContractView(db, me, c) {
       mobileStatus: s.mobileStatus || '',
       mobileMemo: isMine(me, s) ? s.mobileMemo || '' : '',
       reportedAt: s.reportedAt,
+      ...(isMine(me, s) ? { scope: scopeOf(c), workRecord: s.workRecord || null } : {}),
     })),
   };
 }
@@ -398,7 +483,11 @@ export const engineerApp = {
   },
 
   // 기사 현장 보고 → 계약서 '모바일웹 ①②③' 에 표시
-  async report({ contractId, stepIndex, mobileStatus, memo }) {
+  // 시공완료 보고: done(한 범위)·undone(못 한 범위)·material(사용 자재·색상) → 회차의 '시공 기록'(누가·언제·무엇을·무엇으로)
+  //   note: 체크로 애매한 부분을 직접 적은 글 (예: 샤워벽은 절반만, 나머지 다음 방문)
+  //   items: [{ text, done, material, worker }] 항목별 완료·자재·작업자(팀장), helpers: 함께한 팀장·작업자
+  //   material + color: 자재와 번호(색상) — 예: 크린파파 위너스 + 101 → '크린파파 위너스 101번'
+  async report({ contractId, stepIndex, mobileStatus, memo, done, undone, material, color, note, items, helpers }) {
     const { db, user } = await authorizeEngineer();
     const c = db.contracts.find((x) => x.id === Number(contractId) && x.companyId === user.companyId && !x.deletedAt);
     const s = c?.schedules[stepIndex];
@@ -409,11 +498,52 @@ export const engineerApp = {
     s.mobileMemo = memo || '';
     s.reportedAt = nowIso();
     s.reportedBy = user.name;
-    addHistory(c, user, `기사 보고 (${stepIndex + 1}차)`, [
-      { label: `모바일웹 ${stepIndex + 1}`, from: before, to: s.mobileStatus || '입력 전' },
-    ]);
+    const str = (v, n) => String(v || '').trim().slice(0, n);
+    const texts = (v) => (Array.isArray(v) ? v.map((x) => str(x, 200)).filter(Boolean).slice(0, 100) : []);
+    const list = Array.isArray(items)
+      ? items
+          .slice(0, 100)
+          .map((x) => ({ text: str(x?.text, 200), done: x?.done !== false, material: str(x?.material, 100), color: str(x?.color, 30), worker: str(x?.worker, 50) }))
+          .filter((x) => x.text)
+      : null;
+    const has = list || Array.isArray(done) || Array.isArray(undone) || material || note || helpers;
+    const record =
+      s.mobileStatus === '시공완료' && has
+        ? {
+            ...(list ? { items: list } : {}),
+            done: list ? list.filter((x) => x.done).map((x) => x.text) : texts(done),
+            undone: list ? list.filter((x) => !x.done).map((x) => x.text) : texts(undone),
+            material: str(material, 200),
+            color: str(color, 30),
+            helpers: str(helpers, 200),
+            note: str(note, 1000),
+            by: user.name,
+            at: s.reportedAt,
+          }
+        : null;
+    if (record) s.workRecord = record;
+    else delete s.workRecord; // 시공완료가 아니면 예전 기록은 지움 (헷갈리지 않게)
+    const fields = [{ label: `모바일웹 ${stepIndex + 1}`, from: before, to: s.mobileStatus || '입력 전' }];
+    if (record) {
+      const line = (x) => [x.text, x.material || x.color ? materialText(x.material, x.color) : materialText(record.material, record.color), x.worker].filter(Boolean).join(' / ');
+      fields.push({ label: '완료', from: '', to: (list ? list.filter((x) => x.done).map(line) : record.done).join(', ') || '-' });
+      if (record.undone.length) fields.push({ label: '미시공', from: '', to: record.undone.join(', ') });
+      if (record.helpers) fields.push({ label: '함께한 사람', from: '', to: record.helpers });
+      if (record.material || record.color) fields.push({ label: '자재', from: '', to: materialText(record.material, record.color) });
+      if (record.note) fields.push({ label: '시공 내용', from: '', to: record.note });
+    }
+    addHistory(c, user, `기사 보고 (${stepIndex + 1}차)`, fields);
     saveDb(db);
     return mySchedule(db, user, c, s, stepIndex);
+  },
+
+  // 내 박람회 일정 (본인이 포함된 것만)
+  async myFairs({ from, to } = {}) {
+    const { db, user } = await authorizeEngineer();
+    return (companyOf(db, user)?.fairs || [])
+      .filter((f) => (f.engineerIds || []).includes(user.engineerId) && fairInRange(f, from, to))
+      .sort(sortFairs)
+      .map((f) => ({ id: f.id, date: f.date, endDate: f.endDate || '', label: fairLabel(f) }));
   },
 
   async myOffs({ from, to } = {}) {

@@ -34,6 +34,7 @@ export const {
   engineerOffs,
   engineerApp,
   scheduleSettings,
+  fairs,
   imports,
   customerApp,
   auditLogs,

@@ -3,18 +3,20 @@ import { linkProps, match, navigate, useRoute } from './router.js';
 import './App.css';
 
 import { useAuth } from './auth/AuthContext.jsx';
-import { API_MODE, companies } from './api/index.js';
+import { API_MODE, contracts as contractsApi } from './api/index.js';
 import { ROLES, ROLE_LABELS } from './auth/permissions.js';
 import { formatKoreanDate, today } from './utils/date.js';
-import { pageTitle } from './utils/pageTitle.js';
+import { usePageTitle } from './utils/title.js';
 
-import LoginPage from './pages/LoginPage.jsx';
+import LoginPage, { loginEntry, setLoginEntry } from './pages/LoginPage.jsx';
 import SignPage from './pages/SignPage.jsx';
 import CustomerApp from './pages/CustomerApp.jsx';
 import EngineerApp from './pages/EngineerApp.jsx';
 import ContractPage, { resetContractListView } from './pages/ContractPage.jsx';
+import ConsultHome from './pages/ConsultHome.jsx';
 import CustomerManagement from './components/CustomerManagement.jsx';
 import ScheduleManagement from './components/ScheduleManagement.jsx';
+import FairModal from './components/FairModal.jsx';
 import ProgressStatus from './components/ProgressStatus.jsx';
 import StatsPage from './pages/StatsPage.jsx';
 import PurchasePage from './pages/PurchasePage.jsx';
@@ -37,6 +39,7 @@ const MENUS = [
     path: '/contracts',
     subs: [
       { key: 'main', label: '계약관리', path: '/contracts' },
+      { key: 'as', label: 'AS관리', path: '/contracts/as' },
       { key: 'trash', label: '휴지통', path: '/contracts/trash', perm: 'contract.delete' },
     ],
   },
@@ -78,6 +81,10 @@ const MENUS = [
   },
 ];
 
+// 상담실장 화면 (/업체주소/t 로 로그인): 상담홈 + 계약·계약자·일정 + 내 정보만 (통계·진행상황·설정은 숨김)
+const CONSULT_MENU = { key: 'consult', label: '상담홈', icon: '🏠', path: '/consult' };
+const CONSULT_KEYS = ['consult', 'contract', 'customer', 'schedule', 'setting'];
+
 // 설정 하위 화면
 const SETTING_PAGES = {
   users: AccountManagement,
@@ -93,23 +100,7 @@ const SETTING_PAGES = {
 
 export default function App() {
   const route = useRoute();
-  const { user, company, loading } = useAuth();
-
-  // 브라우저 탭 제목: 링크(화면)마다 다르게 — 예) "신화탄성 기사모바일 | VerityBase"
-  //   로그인한 업체면 그 이름, 아니면 주소의 업체 코드로 이름 조회
-  const ownName = user && user.role !== ROLES.SUPER && company?.code === route.base ? company.name : '';
-  const [baseName, setBaseName] = useState({ code: '', name: '' });
-  useEffect(() => {
-    if (!route.base || ownName || baseName.code === route.base) return;
-    companies
-      .publicInfo(route.base)
-      .then((c) => setBaseName({ code: route.base, name: c?.name || '' }))
-      .catch(() => setBaseName({ code: route.base, name: '' }));
-  }, [route.base, ownName]); // eslint-disable-line react-hooks/exhaustive-deps
-  const titleName = ownName || (baseName.code === route.base ? baseName.name : '');
-  useEffect(() => {
-    document.title = pageTitle(route, titleName);
-  }, [route.base, route.path, titleName]); // eslint-disable-line react-hooks/exhaustive-deps
+  const { user, loading } = useAuth();
 
   // 고객 전자서명 페이지는 로그인 없이 접근 (/sign/토큰). 예전 형식(#/sign/토큰) 링크도 지원
   const legacy = window.location.hash.match(/^#\/sign\/([\w-]+)/);
@@ -128,7 +119,10 @@ export default function App() {
   if (cust) return <CustomerApp companyCode={route.base} token={cust.token} />;
 
   if (loading) return <div className="page-loading">불러오는 중...</div>;
-  if (!user) return <LoginPage companyCode={route.base} engineer={route.path === '/m' || route.path.startsWith('/m/')} />;
+  if (!user) {
+    const kind = route.path === '/m' || route.path.startsWith('/m/') ? 'engineer' : route.path === '/t' ? 'manager' : loginEntry(); // 상담실장 탭에서 로그인이 끊기면 상담실장 로그인
+    return <LoginPage key={kind} companyCode={route.base} kind={kind} />;
+  }
   return <CompanyGate route={route} />;
 }
 
@@ -146,14 +140,56 @@ function CompanyGate({ route }) {
     return (
       <LoginPage
         companyCode={route.base}
-        engineer={route.path === '/m' || route.path.startsWith('/m/')}
+        kind={route.path === '/m' || route.path.startsWith('/m/') ? 'engineer' : route.path === '/t' ? 'manager' : 'staff'}
         signedInAs={company ? `${company.name} · ${user.name}` : user.name}
         onStay={() => navigate(route.path, { replace: true, base: code })}
       />
     );
   if (wrongBase) return null;
   if (user.role === ROLES.ENGINEER) return <EngineerApp route={route} />;
+  if (route.path === '/t') return <ConsultSwitch />;
   return <MainLayout route={route} />;
+}
+
+// 로그인한 채로 /업체/t (상담실장 주소)를 열었을 때
+//   실장(직원) 계정 → 상담실장 화면(상담홈)으로 바꿈 / 관리자 계정 → /t 는 직원 전용이라 안내 (로그아웃하고 실장으로)
+function ConsultSwitch() {
+  const { user, logout } = useAuth();
+  const staff = user.role === ROLES.MANAGER;
+  useEffect(() => {
+    if (!staff) return;
+    setLoginEntry('manager');
+    navigate('/consult', { replace: true });
+  }, [staff]);
+  if (staff) return null;
+  return (
+    <div className="login-bg">
+      <div className="login-card consult-switch">
+        <div className="login-left">
+          <h1>상담실장 화면</h1>
+          <p className="login-sub">
+            지금 <b>{user.name}({ROLE_LABELS[user.role] || user.role})</b> 계정으로 로그인되어 있습니다.
+            <br />
+            상담실장 화면(/t)은 실장(직원) 계정 전용입니다.
+          </p>
+        </div>
+        <div className="login-form">
+          <button
+            type="button"
+            onClick={async () => {
+              await logout();
+              navigate('/t', { replace: true });
+            }}
+          >
+            로그아웃하고 상담실장으로 로그인
+          </button>
+          <button type="button" className="consult-switch-back" onClick={() => navigate('/', { replace: true })}>
+            지금 계정으로 계속 (일반화면)
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 // 주소가 어느 메뉴에 속하는지
@@ -172,14 +208,25 @@ function MainLayout({ route }) {
     if (item.visible) return item.visible(user);
     return !item.perm || can(item.perm);
   };
-  const menus = MENUS.filter((m) => {
-    if (user.role === ROLES.SUPER) return ['accounts', 'alimtalk', 'terms', 'setting'].includes(m.key);
-    return m.always || allowed(m);
-  })
+  const consult = user.role !== ROLES.SUPER && loginEntry() === 'manager'; // 상담실장 주소(/t)로 들어옴
+  const menus = (consult ? [CONSULT_MENU, ...MENUS] : MENUS)
+    .filter((m) => {
+      if (user.role === ROLES.SUPER) return ['accounts', 'alimtalk', 'terms', 'setting'].includes(m.key);
+      if (consult) return CONSULT_KEYS.includes(m.key) && (m.always || allowed(m));
+      return m.always || allowed(m);
+    })
     .map((m) => ({ ...m, subs: (m.subs || []).filter(allowed) }))
+    .map((m) => (consult && m.key === 'setting' ? { ...m, label: '내 정보', icon: '🙂', subs: m.subs.filter((s) => s.key === 'me') } : m))
     .map((m) => ({ ...m, path: m.path || m.subs[0]?.path }));
 
+  // 계약자 연결 바로잡기 (동명이인 등) — 업체마다 한 번만 실제로 일함, 이미 했으면 서버가 바로 끝냄
+  useEffect(() => {
+    if (user.role === ROLES.SUPER || !can('contract.edit')) return;
+    contractsApi.repairCustomerLinks().catch(() => {}); // 실패해도 화면 사용에는 지장 없음 (다음 로그인 때 다시)
+  }, [user.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const [openDropdown, setOpenDropdown] = useState(null);
+  const [fairOpen, setFairOpen] = useState(false); // 박람회 일정 등록 팝업
   const current = menus.find((m) => belongsTo(m, path));
   const home = menus[0]?.path || '/me';
 
@@ -202,8 +249,9 @@ function MainLayout({ route }) {
   };
 
   const handleLogout = async () => {
+    const back = loginEntry() === 'manager' ? '/t' : '/'; // 상담실장 탭이면 그 로그인 화면으로
     await logout();
-    navigate('/', { replace: true });
+    navigate(back, { replace: true });
   };
 
   const periodEnd = company?.periodEnd;
@@ -211,11 +259,18 @@ function MainLayout({ route }) {
     ? Math.ceil((new Date(`${periodEnd}T00:00:00`) - new Date(`${today()}T00:00:00`)) / 86400000)
     : null;
 
-  const subActive = (s) =>
-    s.exact ? path === s.path : s.key === 'main' ? path === s.path || /^\/contracts\/(\d+|new)/.test(path) : path.startsWith(s.path);
+  // 탭 이름: '계약관리 · 더좋은집 VerityBase', AS관리·휴지통 등 하위 메뉴면 그 이름, 운영자는 'VerityBase 운영자'
+  const currentSub = current?.subs?.length > 1 ? current.subs.find((s) => (s.exact ? path === s.path : s.key === 'main' ? path === s.path || /^\/contracts\/(\d+|new)/.test(path) : path.startsWith(s.path))) : null;
+  const pageName = path === '/consult' ? '상담홈' : path === '/contracts/new' ? '계약 등록' : (currentSub || current)?.label || '';
+  usePageTitle(
+    `${pageName ? `${pageName} · ` : ''}${company ? `${company.name} VerityBase` : 'VerityBase 운영자'}${consult ? ' (상담실장)' : ''}`,
+    company ? `${company.name}${consult ? ' 상담' : ''}` : 'VerityBase 운영자',
+  );
+
+  const subActive = (s) => (s.exact ? path === s.path : s.key === 'main' ? path === s.path || /^\/contracts\/(\d+|new)/.test(path) : path.startsWith(s.path));
 
   return (
-    <div className="app-container">
+    <div className={`app-container ${consult ? 'consult-mode' : ''}`}>
       <header className="app-header">
         <a className="brand-logo" {...linkProps(home, goHome)} title="메인화면">
           <span className="logo-box">VB</span>
@@ -247,12 +302,18 @@ function MainLayout({ route }) {
         </nav>
       </header>
 
+      {fairOpen && <FairModal onSaved={() => window.dispatchEvent(new Event('vb:fairs-changed'))} onClose={() => setFairOpen(false)} />}
       <div className="sub-header">
         <div className="quick-btn-group">
           {can('contract.create') && (
             <a className="btn-quick blue" {...linkProps('/contracts/new', go)}>
               + 계약 등록
             </a>
+          )}
+          {can('fair.manage') && (
+            <button type="button" className="btn-quick green" onClick={() => setFairOpen(true)}>
+              🎪 박람회 일정 등록
+            </button>
           )}
         </div>
         <div className="welcome">
@@ -286,6 +347,7 @@ function MainLayout({ route }) {
       )}
 
       <main className="content" key={homeKey}>
+        {current?.key === 'consult' && <ConsultHome />}
         {current?.key === 'contract' && <ContractPage route={route} />}
         {current?.key === 'customer' && <CustomerManagement route={route} />}
         {current?.key === 'schedule' && <ScheduleManagement />}

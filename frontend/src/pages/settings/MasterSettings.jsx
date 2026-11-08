@@ -1,16 +1,15 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { apartments, engineers, products, scheduleSettings, teams } from '../../api/index.js';
 import { useAuth } from '../../auth/AuthContext.jsx';
-import { CATEGORIES, DEFAULT_SCHEDULE_SETTINGS } from '../../constants.js';
+import { CATEGORIES, DEFAULT_SCHEDULE_SETTINGS, PRODUCT_KINDS } from '../../constants.js';
 import { formatPhone, won } from '../../utils/format.js';
 import Pagination from '../../components/Pagination.jsx';
+import MoneyInput from '../../components/MoneyInput.jsx';
 import { backdrop } from '../../utils/backdrop.js';
 import { goBack, match, navigate, navigateForward } from '../../router.js';
 import { REGIONS, SIDO_LIST } from '../../utils/regions.js';
 import EngineerForm from './EngineerForm.jsx';
 import { resetAptCache } from '../../components/AptSearchInput.jsx';
-
-export const PRODUCT_KINDS = ['패키지', '추가시공품목', '무료시공'];
 
 const PAGE_SIZE = 20;
 
@@ -141,6 +140,8 @@ function MasterPage({ title, notices, api, columns, fields, filters = [], search
             onChange={(e) => setField(f.key, e.target.value)}
           />
         );
+      case 'money':
+        return <MoneyInput value={value ?? ''} onChange={(v) => setField(f.key, v)} />;
       case 'tel':
         return <input type="tel" className="input-text" value={value} onChange={(e) => setField(f.key, formatPhone(e.target.value))} placeholder="010-0000-0000" required={f.required} />;
       default:
@@ -372,20 +373,20 @@ export function ProductSettings({ path = '' }) {
       path={path}
       notices={[
         '계약서 등록 시 사용되는 상품코드 관리 페이지입니다.',
-        '상품을 미리 등록해 두면 계약 등록 시 [상품선택]으로 시공내용과 금액이 자동 입력됩니다.',
+        '상품을 미리 등록해 두면 계약 등록 시 [시공선택]의 패키지 · 추가시공품목 칸에서 골라 시공내용과 금액이 자동 입력됩니다.',
         '사용하지 않는 상품은 비활성화 하세요. 비활성화 하시면 계약서 작성 시 상품리스트에 표시되지 않습니다.',
       ]}
       api={products}
       searchKeys={['name', 'detail', 'freeDetail']}
       filters={[
-        { key: 'category', placeholder: '품목', options: WORK_CATEGORIES },
-        { key: 'kind', placeholder: '구분', options: PRODUCT_KINDS },
+        { key: 'category', placeholder: '시공 구분', options: WORK_CATEGORIES },
+        { key: 'kind', placeholder: '상품 종류', options: PRODUCT_KINDS },
       ]}
       emptyForm={{ name: '', kind: PRODUCT_KINDS[0], category: WORK_CATEGORIES[0], detail: '', freeDetail: '', price: '', warranty: '', visible: true }}
       columns={[
         { key: 'name', label: '상품명', className: 'text-left' },
-        { key: 'kind', label: '구분' },
-        { key: 'category', label: '품목' },
+        { key: 'kind', label: '상품 종류' },
+        { key: 'category', label: '시공 구분' },
         { key: 'detail', label: '상세품목', className: 'text-left' },
         { key: 'price', label: '금액', className: 'text-right', render: (r) => won(r.price) },
         { key: 'warranty', label: '품질보증', render: (r) => r.warranty || '-' },
@@ -393,11 +394,11 @@ export function ProductSettings({ path = '' }) {
       ]}
       fields={[
         { key: 'name', label: '상품명', required: true },
-        { key: 'kind', label: '구분', type: 'radio', options: PRODUCT_KINDS.slice(0, 2) },
-        { key: 'category', label: '품목', type: 'radio', options: WORK_CATEGORIES },
+        { key: 'kind', label: '상품 종류', type: 'radio', options: PRODUCT_KINDS.slice(0, 2), help: '계약 등록 [시공선택]에서 패키지 칸 / 추가시공품목 칸 중 어디에 나올지 정합니다.' },
+        { key: 'category', label: '시공 구분', type: 'radio', options: WORK_CATEGORIES, help: '계약 등록의 시공 구분(줄눈·청소…)과 같습니다. 패키지·추가시공품목 모두 같은 시공 구분일 때만 보입니다.' },
         { key: 'detail', label: '상세품목', type: 'textarea', rows: 10 },
         { key: 'freeDetail', label: '무료시공내역', type: 'textarea', rows: 10 },
-        { key: 'price', label: '금액', type: 'number', help: '계약 등록 시 [상품선택]하면 이 금액이 자동 입력됩니다.' },
+        { key: 'price', label: '금액', type: 'money', help: '계약 등록 [시공선택]에서 이 상품을 고르면 이 금액이 단가로 들어갑니다.' },
         { key: 'warranty', label: '품질보증', help: 'A/S 기간 (예: 10년). 탄성·페인트 계약서의 품질보증 칸에 들어갑니다.' },
         { key: 'visible', label: '활성화', type: 'checkbox', checkLabel: '활성화', note: '사용하지 않는 상품은 비활성화 하세요. 비활성화 하시면 계약서 작성 시 상품리스트에 표시되지 않습니다.' },
       ]}
@@ -515,6 +516,7 @@ export function ScheduleSettings() {
         <ul className="notice-list">
           <li>계약서/일정관리의 시간 선택 목록과 기사 휴무(오전/오후) 판단 기준을 설정합니다.</li>
           <li>기사 1인 하루 최대 배정 건수를 정하면 초과 배정이 차단됩니다. (0 = 제한 없음)</li>
+          <li>시공 자재 목록은 기사 모바일 시공완료 보고 때 고르는 목록입니다. 기사는 자재를 고르고 번호(색상)만 적습니다. (예: 크린파파 위너스 101번)</li>
         </ul>
       </div>
       <form onSubmit={save}>
@@ -544,6 +546,19 @@ export function ScheduleSettings() {
               <td className="label-col">하루 최대 배정</td>
               <td className="input-col">
                 {f('maxPerDay', { type: 'number', min: 0, style: { width: 80 } })} 건 / 기사 1인
+              </td>
+            </tr>
+            <tr>
+              <td className="label-col">시공 자재 목록</td>
+              <td className="input-col">
+                <textarea
+                  className="input-text full"
+                  rows={6}
+                  value={(form.materials || []).join('\n')}
+                  onChange={(e) => setForm({ ...form, materials: e.target.value.split('\n') })}
+                  placeholder={'한 줄에 하나씩\n크린파파 위너스\n빅라이언'}
+                />
+                <div className="sub-text">한 줄에 자재 하나씩 적어 주세요. 번호(색상)는 기사가 현장에서 적습니다.</div>
               </td>
             </tr>
           </tbody>
