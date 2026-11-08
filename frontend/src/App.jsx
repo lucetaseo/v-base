@@ -260,7 +260,7 @@ function MainLayout({ route }) {
     : null;
 
   // 탭 이름: '계약관리 · 더좋은집 VerityBase', AS관리·휴지통 등 하위 메뉴면 그 이름, 운영자는 'VerityBase 운영자'
-  const currentSub = current?.subs?.length > 1 ? current.subs.find((s) => (s.key === 'main' ? path === s.path || /^\/contracts\/(\d+|new)/.test(path) : path.startsWith(s.path))) : null;
+  const currentSub = current?.subs?.length > 1 ? current.subs.find((s) => (s.exact ? path === s.path : s.key === 'main' ? path === s.path || /^\/contracts\/(\d+|new)/.test(path) : path.startsWith(s.path))) : null;
   const pageName = path === '/consult' ? '상담홈' : path === '/contracts/new' ? '계약 등록' : (currentSub || current)?.label || '';
   usePageTitle(
     `${pageName ? `${pageName} · ` : ''}${company ? `${company.name} VerityBase` : 'VerityBase 운영자'}${consult ? ' (상담실장)' : ''}`,
