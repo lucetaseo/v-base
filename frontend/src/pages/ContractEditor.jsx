@@ -44,7 +44,6 @@ import {
   slotOf,
   teamOffStatus,
   timeFieldsOf,
-  timeLabel,
   timeOptions,
   timeValueOf,
 } from '../utils/contract.js';
@@ -706,7 +705,8 @@ export default function ContractEditor({ contractId, prefillFrom, prefillCategor
         </h3>
         <table className={`form-grid-table fold-mobile ${schedOpen ? 'open' : ''}`}>
           <tbody>
-            {form.schedules.map((s, i) => {
+            {/* 시공일자·기사배정 권한이 없으면 회차 칸은 아예 안 보임 (시공상태만) */}
+            {canSchedule && form.schedules.map((s, i) => {
               return (
                 <tr key={i} className="schedule-step-row">
                   <ScheduleStep i={i} s={s} name={`assign-${i}`} category={form.category} onPatch={(patch) => setStep(i, patch)} {...stepCtx} />
@@ -934,65 +934,50 @@ function ExtraWork({ no, work, products, showAmount, stepCtx, onChange, onRemove
           )}
         </tbody>
       </table>
-      {/* 휴대폰·태블릿: 일정 칸은 접어 두고 누르면 펼침 (PC는 제목 없이 항상 펼침) */}
-      <h4 className={`fold-mobile-title fold-touch-only ${schedOpen ? 'open' : ''}`}>
-        <button type="button" className="fold-mobile-btn" onClick={() => setSchedOpen((v) => !v)} aria-expanded={schedOpen}>
-          추가 시공 {no} 일정 ({work.category}) <span className="fold-mobile-hint">{schedOpen ? '▲ 접기' : '▼ 눌러서 펼치기'}</span>
-        </button>
-      </h4>
-      <table className={`form-grid-table extra-work-schedule fold-mobile ${schedOpen ? 'open' : ''}`}>
-        <tbody>
-          {steps.map((s, i) => (
-            <tr key={i} className="schedule-step-row">
-              <ScheduleStep i={i} s={s} name={`extra${no}-assign-${i}`} category={work.category} onPatch={(patch) => setStep(i, patch)} {...stepCtx} />
-            </tr>
-          ))}
-          <tr>
-            <td className="label-col">일정</td>
-            <td className="input-col" colSpan={3}>
-              <div className="inline-fields">
-                {steps.length < MAX_SCHEDULE_STEPS && (
-                  <button type="button" className="btn-dark-sm" onClick={() => onChange({ schedules: [...steps, emptySchedule()] })}>
-                    + 회차 추가
-                  </button>
-                )}
-                {steps.length > 1 && (
-                  <button type="button" className="btn-text-danger" onClick={() => onChange({ schedules: steps.slice(0, -1) })}>
-                    마지막 회차 빼기
-                  </button>
-                )}
-                <span className="sub-text">이 시공({work.category})의 시공일·담당 기사입니다. 비워 두면 등록 뒤 그 계약에서 정해도 됩니다.</span>
-              </div>
-            </td>
-          </tr>
-        </tbody>
-      </table>
+      {/* 휴대폰·태블릿: 일정 칸은 접어 두고 누르면 펼침 (PC는 제목 없이 항상 펼침) — 시공일자 권한이 없으면 일정 칸 없음 */}
+      {!stepCtx.readOnly && (
+        <>
+          <h4 className={`fold-mobile-title fold-touch-only ${schedOpen ? 'open' : ''}`}>
+            <button type="button" className="fold-mobile-btn" onClick={() => setSchedOpen((v) => !v)} aria-expanded={schedOpen}>
+              추가 시공 {no} 일정 ({work.category}) <span className="fold-mobile-hint">{schedOpen ? '▲ 접기' : '▼ 눌러서 펼치기'}</span>
+            </button>
+          </h4>
+          <table className={`form-grid-table extra-work-schedule fold-mobile ${schedOpen ? 'open' : ''}`}>
+            <tbody>
+              {steps.map((s, i) => (
+                <tr key={i} className="schedule-step-row">
+                  <ScheduleStep i={i} s={s} name={`extra${no}-assign-${i}`} category={work.category} onPatch={(patch) => setStep(i, patch)} {...stepCtx} />
+                </tr>
+              ))}
+              <tr>
+                <td className="label-col">일정</td>
+                <td className="input-col" colSpan={3}>
+                  <div className="inline-fields">
+                    {steps.length < MAX_SCHEDULE_STEPS && (
+                      <button type="button" className="btn-dark-sm" onClick={() => onChange({ schedules: [...steps, emptySchedule()] })}>
+                        + 회차 추가
+                      </button>
+                    )}
+                    {steps.length > 1 && (
+                      <button type="button" className="btn-text-danger" onClick={() => onChange({ schedules: steps.slice(0, -1) })}>
+                        마지막 회차 빼기
+                      </button>
+                    )}
+                    <span className="sub-text">이 시공({work.category})의 시공일·담당 기사입니다. 비워 두면 등록 뒤 그 계약에서 정해도 됩니다.</span>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </>
+      )}
     </>
   );
 }
 
 // 시공 회차 하나의 칸들: 시공일·시간 + 시공담당(기사/팀 배정, 휴무 표시)
 //   본 계약의 시공정보와 [+ 시공 추가]의 일정에서 같이 씀. 휴무(offs)는 부모가 입력된 날짜로 불러 줌
-function ScheduleStep({ i, s, name, category, onPatch, settings, timeOpts, engineers, crewTeams, offs, readOnly = false }) {
-  if (readOnly) {
-    const who =
-      s.assignType === ASSIGN_TYPES.TEAM
-        ? crewTeams.find((t) => String(t.id) === String(s.teamId))?.name
-        : engineers.find((en) => String(en.id) === String(s.engineerId))?.name || s.engineerName;
-    return (
-      <>
-        <td className="label-col">시공 등록 {CIRCLED[i]}</td>
-        <td className="input-col">
-          {s.date ? `${s.date} ${timeLabel(s)}`.trim() : <span className="sub-text">미정</span>}
-        </td>
-        <td className="label-col">시공담당 {CIRCLED[i]}</td>
-        <td className="input-col">
-          {who || <span className="sub-text">미배정</span>}
-          {i === 0 && <div className="sub-text text-orange">ⓘ 시공일자·기사배정은 권한이 있는 사람만 입력할 수 있습니다. (설정 &gt; 사용자관리)</div>}
-        </td>
-      </>
-    );
-  }
+function ScheduleStep({ i, s, name, category, onPatch, settings, timeOpts, engineers, crewTeams, offs }) {
   const offOf = (engineerId, date) => offs.find((o) => String(o.engineerId) === String(engineerId) && o.date === date);
   const slot = slotOf(s, settings);
   const selectedOff = s.assignType === ASSIGN_TYPES.ENGINEER && s.engineerId && s.date ? offOf(s.engineerId, s.date) : null;
