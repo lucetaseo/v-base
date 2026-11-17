@@ -25,6 +25,7 @@ export const {
   apartments,
   purchases,
   stocks,
+  callLogs,
   customers,
   contracts,
   esign,

@@ -184,7 +184,12 @@ function normalizeContractInput(db, user, data, existing) {
     contractDate: data.contractDate,
     moveInDate: isDateKey(data.moveInDate) ? data.moveInDate : '',
     approval,
-    schedules: normalizeSchedules(db, user, data.schedules, existing?.schedules),
+    // 시공일자·기사배정은 schedule.edit 권한(관리자는 항상)이 있을 때만 — 없으면 원래 일정 그대로 (새 계약은 빈 일정)
+    schedules: can(user, 'schedule.edit')
+      ? normalizeSchedules(db, user, data.schedules, existing?.schedules)
+      : existing
+        ? clone(existing.schedules || [])
+        : normalizeSchedules(db, user, [{}]),
     status,
     completedDate: status === '시공완료' ? (isDateKey(data.completedDate) ? data.completedDate : today()) : '',
     canceledDate: status === '취소' ? (isDateKey(data.canceledDate) ? data.canceledDate : today()) : '',

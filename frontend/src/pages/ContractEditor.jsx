@@ -44,6 +44,7 @@ import {
   slotOf,
   teamOffStatus,
   timeFieldsOf,
+  timeLabel,
   timeOptions,
   timeValueOf,
 } from '../utils/contract.js';
@@ -355,7 +356,9 @@ export default function ContractEditor({ contractId, prefillFrom, prefillCategor
   const newExtra = (category) => ({ category, workType: WORK_TYPES[0], receptionType: form.receptionType, lineItems: [], items: '', totalAmount: '', discount: '', voucher: '', payments: [firstPayment()], schedules: [emptySchedule()] });
   const usedCategories = [form.category, ...extras.map((x) => x.category)];
   const timeOpts = timeOptions(settings);
-  const stepCtx = { settings, timeOpts, engineers, crewTeams, offs };
+  // 시공일자·기사배정은 schedule.edit 권한(관리자는 항상)이 있어야 입력 — 없으면 보기만 (서버도 바꾸지 않음)
+  const canSchedule = can('schedule.edit');
+  const stepCtx = { settings, timeOpts, engineers, crewTeams, offs, readOnly: !canSchedule };
 
   return (
     <div className="page-card contract-editor">
@@ -970,7 +973,26 @@ function ExtraWork({ no, work, products, showAmount, stepCtx, onChange, onRemove
 
 // 시공 회차 하나의 칸들: 시공일·시간 + 시공담당(기사/팀 배정, 휴무 표시)
 //   본 계약의 시공정보와 [+ 시공 추가]의 일정에서 같이 씀. 휴무(offs)는 부모가 입력된 날짜로 불러 줌
-function ScheduleStep({ i, s, name, category, onPatch, settings, timeOpts, engineers, crewTeams, offs }) {
+function ScheduleStep({ i, s, name, category, onPatch, settings, timeOpts, engineers, crewTeams, offs, readOnly = false }) {
+  if (readOnly) {
+    const who =
+      s.assignType === ASSIGN_TYPES.TEAM
+        ? crewTeams.find((t) => String(t.id) === String(s.teamId))?.name
+        : engineers.find((en) => String(en.id) === String(s.engineerId))?.name || s.engineerName;
+    return (
+      <>
+        <td className="label-col">시공 등록 {CIRCLED[i]}</td>
+        <td className="input-col">
+          {s.date ? `${s.date} ${timeLabel(s)}`.trim() : <span className="sub-text">미정</span>}
+        </td>
+        <td className="label-col">시공담당 {CIRCLED[i]}</td>
+        <td className="input-col">
+          {who || <span className="sub-text">미배정</span>}
+          {i === 0 && <div className="sub-text text-orange">ⓘ 시공일자·기사배정은 권한이 있는 사람만 입력할 수 있습니다. (설정 &gt; 사용자관리)</div>}
+        </td>
+      </>
+    );
+  }
   const offOf = (engineerId, date) => offs.find((o) => String(o.engineerId) === String(engineerId) && o.date === date);
   const slot = slotOf(s, settings);
   const selectedOff = s.assignType === ASSIGN_TYPES.ENGINEER && s.engineerId && s.date ? offOf(s.engineerId, s.date) : null;
