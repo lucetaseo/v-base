@@ -13,6 +13,8 @@ import MoneyInput from '../components/MoneyInput.jsx';
 import PaymentPhotos from '../components/PaymentPhotos.jsx';
 import PaperPhotos from '../components/PaperPhotos.jsx';
 import ContractScan from '../components/ContractScan.jsx';
+import DrawingEditor from '../components/DrawingEditor.jsx';
+import { createDrawingDraft } from '../utils/drawingDraft.js';
 import EngineerPicker from '../components/EngineerPicker.jsx';
 import AptSearchInput from '../components/AptSearchInput.jsx';
 import PhoneInput from '../components/PhoneInput.jsx';
@@ -152,6 +154,9 @@ export default function ContractEditor({ contractId, prefillFrom, prefillCategor
   const [customerResults, setCustomerResults] = useState(null);
   const [viewOpen, setViewOpen] = useState(false);
   const [paper, setPaper] = useState({ saved: null, add: [], remove: [] }); // 실물 계약서 사진 (저장 뒤 올림)
+  // 시공 도면 (기능 drawings): 화면에서 그려 두고 계약 [저장] 때 함께 저장
+  const drawingDraft = useMemo(() => createDrawingDraft(contractId || null), [contractId]);
+  const drawingRef = useRef(null);
   // 새 계약에서 [+ 시공 추가]로 함께 등록할 다른 시공들 (같은 고객·현장, 시공마다 계약이 따로 만들어짐)
   const [extras, setExtras] = useState([]);
   const [schedOpen, setSchedOpen] = useState(false); // 시공정보 펼침 (휴대폰·태블릿에서만 접힘)
@@ -289,6 +294,12 @@ export default function ContractEditor({ contractId, prefillFrom, prefillCategor
     // 비어 있는 뒤쪽 회차는 저장하지 않음 (①은 항상 유지)
     const keepSteps = (list) => list.filter((s, i) => i === 0 || s.date || s.engineerId || s.teamId || s.time || s.ampm || s.mobileStatus);
     const schedules = keepSteps(form.schedules);
+    // 시공 도면: 고친 게 있으면 함께 저장할지 물어봄 (취소하면 계약만 저장, 도면은 화면에 그대로)
+    let saveDrawings = false;
+    if (currentHasFeature('drawings')) {
+      await drawingRef.current?.flush();
+      if (drawingDraft.hasChanges()) saveDrawings = window.confirm('도면도 저장하시겠습니까?\n[취소]를 누르면 계약만 저장되고, 도면은 저장되지 않습니다.');
+    }
     setSaving(true);
     try {
       // 입금 줄의 사진(_add/_remove/_saved)은 계약 저장 뒤 입금별로 따로 올림 (한 번에 보내면 용량 한도 초과 위험)
@@ -314,6 +325,10 @@ export default function ContractEditor({ contractId, prefillFrom, prefillCategor
         for (const img of paper.add) saved = await contractApi.setPaperPhotos(saved.id, { add: [img] });
       } catch (err) {
         photoError = `${photoError ? `${photoError}\n` : ''}실물 계약서 사진: ${err.message}`;
+      }
+      if (saveDrawings) {
+        const errs = await drawingDraft.commit(saved.id);
+        if (errs.length) photoError = `${photoError ? `${photoError}\n` : ''}시공 도면: ${errs.join(', ')}`;
       }
       // [+ 시공 추가]로 넣은 시공: 같은 고객·현장 정보로 시공마다 계약을 하나씩 더 만듦 (일정·입금도 그 계약에)
       const nos = [saved.no];
@@ -346,7 +361,7 @@ export default function ContractEditor({ contractId, prefillFrom, prefillCategor
         }
       }
       if (failed.length) alert(`계약 No.${nos.join(', No.')} 은 등록되었지만 추가 시공 일부를 등록하지 못했습니다.\n${failed.join('\n')}\n계약 상세의 [시공등록]으로 다시 추가해 주세요.`);
-      else if (photoError) alert(`계약은 저장되었지만 사진 일부를 올리지 못했습니다.\n${photoError}\n계약 수정에서 다시 첨부해 주세요.`);
+      else if (photoError) alert(`계약은 저장되었지만 사진·도면 일부를 올리지 못했습니다.\n${photoError}\n계약 수정에서 다시 첨부해 주세요.`);
       else if (isEdit) alert('저장되었습니다.');
       // 새 계약: 저장이 끝난 뒤 그 자리에서 고객 서명을 받을지 물어봄 (서명 → 계약완료 알림톡)
       if (!isEdit && window.confirm(`계약이 등록되었습니다. (No.${nos.join(', No.')})\n\n지금 이 기기에서 고객 서명을 받으시겠습니까?\n[취소]를 누르면 나중에 계약서 보기에서 서명 링크를 보낼 수 있습니다.`)) {
@@ -595,6 +610,13 @@ export default function ContractEditor({ contractId, prefillFrom, prefillCategor
             )}
           </tbody>
         </table>
+
+        {currentHasFeature('drawings') && (
+          <>
+            <h3 className="form-section-title">&gt; 시공 도면</h3>
+            <DrawingEditor ref={drawingRef} deferred api={drawingDraft.api} lines={form.lineItems} canEdit onError={handleError} />
+          </>
+        )}
 
         {/* ---------------- 2. 시공 구분 (먼저 골라야 아래 상품 목록이 그 구분 것으로 나옴) ---------------- */}
         <h3 className="form-section-title">&gt; 시공 구분</h3>

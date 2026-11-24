@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { usePageTitle } from '../utils/title.js';
 import { esign } from '../api/index.js';
 import ContractDocument from '../components/ContractDocument.jsx';
+import ContractDrawings from '../components/ContractDrawings.jsx';
 
 // 고객용 전자서명 페이지 (/sign/:token). 로그인 없이 링크로만 접근합니다.
 //   계약 등록 직후 그 자리에서 서명받을 때(OnSiteSign)도 같은 화면을 씀 — onDone: 서명 완료 뒤 부를 함수
@@ -110,6 +111,7 @@ export default function SignPage({ token, onDone }) {
     <div className="sign-page">
       <div className="sign-card">
         <ContractDocument contract={data.contract} contracts={data.contracts} company={data.company} showStatus />
+        {data.contracts.some((c) => c.drawings?.length) && <ContractDrawings load={() => esign.drawings(token)} />}
 
         {done ? (
           <div className="sign-done">✅ 서명이 완료되었습니다. 감사합니다.</div>

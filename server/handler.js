@@ -14,7 +14,7 @@ import * as services from '../frontend/src/api/services.js';
 import { setRuntimeAdapter } from '../frontend/src/api/runtime.js';
 import { ApiError } from '../frontend/src/api/core.js';
 import { bizgoConfigured, listSenders, sendAlimtalk, inquiryReport } from './bizgo.js';
-import { getPool, loadSnapshot, persistChanges, saveAuditLog, resolveCompanyId, contractByEsignToken, companyIdForCustomer, fingerprint, touchedSlim } from './pg.js';
+import { getPool, loadSnapshot, persistChanges, saveAuditLog, resolveCompanyId, contractByEsignToken, contractIdsByEsignToken, companyIdForCustomer, fingerprint, touchedSlim } from './pg.js';
 import { AUDIT_KEEP_DAYS, buildAuditEntry, skipAudit, undoSnapshot } from '../frontend/src/api/audit.js';
 import { hashPassword, verifyPassword } from './password.js';
 import { bootstrap } from './bootstrap.js';
@@ -126,6 +126,7 @@ const READ_ONLY = new Set([
   'products.photo',
   'customerApp.drawings',
   'esign.getByToken',
+  'esign.drawings',
   'customerApp.login',
   'customerApp.linkLogin',
   'customerApp.me',
@@ -419,6 +420,7 @@ async function handleRpcOnce(req, attempt) {
       const { companyId, contractId } = await contractByEsignToken(client, args[0]);
       scope = { companyId };
       if (name === 'esign.getByToken' && contractId) scope.signatureFor = contractId; // 서명 후 다시 열면 본인 서명 표시
+      if (name === 'esign.drawings') scope.receiptsFor = await contractIdsByEsignToken(client, args[0]); // 계약서에 넣을 도면 그림
     } else if (service === 'customerApp') {
       scope = { companyId: await companyIdForCustomer(client, name, args, ctx.session) }; // 고객모바일
       if (name === 'customerApp.drawings') Object.assign(scope, { receiptsFor: args[0], productPhotos: true }); // 도면 그림 + 제품 사진

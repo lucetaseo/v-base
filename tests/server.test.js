@@ -2714,3 +2714,33 @@ test('계약서 스캔 (contractScan): 기본 꺼짐, 켜면 사진 → 칸 값(
     await sup.ok('companies', 'update', good.id, { features: {} });
   }
 });
+
+test('계약서에 시공 도면 넣기 (drawingsInContract): 서명 링크로 도면 그림·도형, 아이콘 메모는 고객에게 안 보임, 기능 끄면 빈 목록', async () => {
+  const admin = client();
+  await admin.ok('auth', 'login', 'admin', 'admin1234');
+  const c = await admin.ok('contracts', 'create', { ...base, customerName: '도면계약서고객', customerPhone: '010-5858-1111', lineItems: [{ name: '다운라이트', qty: 3, unitPrice: 20000 }] });
+  const img = 'data:image/png;base64,' + Buffer.from('room').toString('base64');
+  await admin.ok('contracts', 'saveDrawing', c.id, { name: '거실', image: img, w: 800, h: 600, icons: [{ id: 'a', type: 'downlight', x: 10, y: 20, line: 0, note: '사무실 메모' }], shapes: [{ id: 's', kind: 'text', x: 5, y: 5, text: '거실 2.4m' }] });
+  const { token } = await admin.ok('contracts', 'requestSign', c.id);
+  const anon = client();
+  const doc = await anon.ok('esign', 'getByToken', token);
+  assert.equal(doc.contract.drawings.length, 1, '계약서에 도면이 있다는 표시');
+  assert.equal(doc.contract.drawings[0].icons[0].note, undefined, '계약서 화면에도 메모 없음');
+  const groups = await anon.ok('esign', 'drawings', token);
+  assert.equal(groups.length, 1);
+  assert.equal(groups[0].drawings[0].name, '거실');
+  assert.equal(groups[0].drawings[0].image, img);
+  assert.equal(groups[0].drawings[0].icons[0].note, undefined, '고객에게 메모 안 보임');
+  assert.equal(groups[0].drawings[0].shapes[0].text, '거실 2.4m');
+  assert.deepEqual(groups[0].lines, [{ name: '다운라이트', qty: 3 }]);
+  assert.equal((await anon('esign', 'drawings', 'no-such-token')).status, 404);
+  const sup = client();
+  await sup.ok('auth', 'login', 'super', 'super-test-1234');
+  const good = (await sup.ok('companies', 'list')).find((x) => x.code === 'thegood');
+  await sup.ok('companies', 'update', good.id, { features: { drawingsInContract: false } });
+  try {
+    assert.deepEqual(await anon.ok('esign', 'drawings', token), [], '기능 끄면 계약서에 도면 없음');
+  } finally {
+    await sup.ok('companies', 'update', good.id, { features: {} });
+  }
+});

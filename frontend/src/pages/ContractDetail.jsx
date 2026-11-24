@@ -789,7 +789,6 @@ export default function ContractDetail({ contractId, initialTab, focus, onBack, 
           {amountSection}
           {workList}
           {workInfo}
-          {drawingSection}
           {stepPhotoSection}
           {progressSection}
         </>
@@ -803,6 +802,7 @@ export default function ContractDetail({ contractId, initialTab, focus, onBack, 
               <button type="button" className="btn-dark-lg sm" onClick={() => onEdit(selected)}>계약정보 수정</button>
             </div>
           )}
+          {drawingSection}
           <h3 className="form-section-title">&gt; 변경이력</h3>
           <div className="table-responsive">
             <table className="detail-table history-table">

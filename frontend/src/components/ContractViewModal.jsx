@@ -3,6 +3,7 @@ import { contracts as contractApi } from '../api/index.js';
 import { useAuth } from '../auth/AuthContext.jsx';
 import { ESIGN_STATUS, currentHasFeature } from '../constants.js';
 import ContractDocument from './ContractDocument.jsx';
+import ContractDrawings from './ContractDrawings.jsx';
 import ErrorBoundary from './ErrorBoundary.jsx';
 import KakaoModal from './KakaoModal.jsx';
 import OnSiteSign from './OnSiteSign.jsx';
@@ -80,6 +81,17 @@ export default function ContractViewModal({ contractId, onClose, onChanged }) {
 
         <ErrorBoundary title="계약서를 보여 주는 중 오류가 났습니다." onClose={onClose}>
           <ContractDocument contract={contract} contracts={list} company={company} />
+          {currentHasFeature('drawings') && currentHasFeature('drawingsInContract') && list.some((c) => c.drawings?.length) && (
+            <ContractDrawings
+              load={() =>
+                Promise.all(
+                  list
+                    .filter((c) => c.drawings?.length)
+                    .map(async (c) => ({ contractId: c.id, category: c.category, lines: c.lineItems || [], drawings: await contractApi.drawings(c.id) })),
+                )
+              }
+            />
+          )}
         </ErrorBoundary>
 
         {/* 서명 전: 이 기기(태블릿 등)에서 바로 서명받기 — 등록 때 서명을 건너뛰었거나 고친 뒤 다시 띄운 경우 */}

@@ -328,6 +328,18 @@ export async function companyIdForCustomer(client, name, args, session) {
   return session?.customer?.companyId ? Number(session.customer.companyId) : null;
 }
 
+// 서명 링크 → 한 장으로 묶인 계약 번호들 (계약서에 넣을 도면 그림을 그 계약들 것만 읽으려고)
+export async function contractIdsByEsignToken(client, token) {
+  const { contractId } = await contractByEsignToken(client, token);
+  if (!contractId) return [];
+  const r = await rows(
+    client,
+    `SELECT id FROM contracts WHERE id = $1 OR (COALESCE(data->'esign'->>'token', '') <> '' AND data->'esign'->>'token' = (SELECT data->'esign'->>'token' FROM contracts WHERE id = $1))`,
+    [contractId],
+  );
+  return r.map((x) => Number(x.id));
+}
+
 // 서명 링크 → { companyId, contractId } (없으면 null 들)
 export async function contractByEsignToken(client, token) {
   // 지금 서명 링크 값 → 예전 서명 링크 값 → 고객확인페이지 값 순으로 (contracts.js bundleByToken 과 같게)

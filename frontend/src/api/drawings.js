@@ -1,6 +1,6 @@
 // ============================================================
-// 시공 도면 (기능 스위치 drawings) — 아르떼(조명): 계약마다 층별 도면 위에 조명 아이콘 배치
-//   계약의 drawings: [{ id, name(예: 1층), imageId, w, h, icons: [{ id, type, x, y, line, note }], updatedAt, byName }]
+// 시공 도면 (기능 스위치 drawings) — 아르떼(조명): 계약마다 공간별(거실·안방·베란다 …) 도면 위에 조명 아이콘 배치
+//   계약의 drawings: [{ id, name(공간 — 예: 거실), imageId, w, h, icons: [{ id, type, x, y, line, note }], updatedAt, byName }]
 //     x·y 는 도면 그림 안의 위치(0~100%) — 화면 크기·확대와 상관없이 같은 자리
 //     line: 계약 상품 줄 번호(0부터) — 그 아이콘이 어느 제품인지 (없으면 null)
 //   shapes: [{ id, kind(rect·ellipse·line·arrow·text), x, y, x2, y2, text, color, size, fill }] — 도형·선·글자 (위치 0~100%)
@@ -11,7 +11,7 @@ import { ApiError, nowIso } from './core.js';
 import { nextId } from './runtime.js';
 
 export const DRAWING_KIND = 'drawing';
-export const DRAWINGS_MAX = 10; // 계약 하나에 도면(층) 최대
+export const DRAWINGS_MAX = 20; // 계약 하나에 도면(공간) 최대
 export const ICONS_MAX = 400; // 도면 하나에 아이콘 최대
 const IMAGE_MAX = 4 * 1024 * 1024; // 도면 그림 1장 최대 약 4MB (화면에서 줄여서 올림)
 
