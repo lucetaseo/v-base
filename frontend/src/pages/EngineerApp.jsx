@@ -680,12 +680,13 @@ function ContractView({ id, step }) {
                 list: (i) => engineerApp.stepPhotos(c.id, i),
                 add: (i, photos) => engineerApp.addStepPhotos(c.id, i, photos),
                 remove: (photoId) => engineerApp.removeStepPhoto(c.id, photoId),
+                update: (photoId, note) => engineerApp.updateStepPhoto(c.id, photoId, note),
               }}
               stepIndex={s.stepIndex}
               label={`${CIRCLED[s.stepIndex]} ${s.stepIndex + 1}차${s.date ? ` (${s.date})` : ''}`}
               count={s.photoCount || 0}
               canUpload={s.mine}
-              canDelete={(p) => s.mine && p.byName === user.name}
+              canDelete={(p) => s.mine && (p.byEngineerId ? p.byEngineerId === user.engineerId : p.byName === user.name)}
               onError={handleError}
             />
           ))}

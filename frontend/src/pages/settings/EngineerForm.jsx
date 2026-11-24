@@ -47,6 +47,10 @@ const toForm = (e) => {
     addressDetail: e?.addressDetail || '',
     teamId: e?.teamId ? String(e.teamId) : '',
     memo: e?.memo || '',
+    region: e?.region || '',
+    serviceArea: e?.serviceArea || '',
+    specialty: e?.specialty || '',
+    strengths: e?.strengths || '',
     active: e ? e.active !== false : true,
   };
 };
@@ -103,6 +107,10 @@ export default function EngineerForm({ engineerId }) {
         addressDetail: form.addressDetail,
         teamId: form.teamId,
         memo: form.memo,
+        region: form.region,
+        serviceArea: form.serviceArea,
+        specialty: form.specialty,
+        strengths: form.strengths,
         active: form.active,
       });
       goBack(LIST_PATH);
@@ -198,6 +206,26 @@ export default function EngineerForm({ engineerId }) {
                 <input className="input-text zip" value={form.zipcode} onChange={(e) => set('zipcode', digitsOnly(e.target.value))} inputMode="numeric" maxLength={5} />
                 <input className="input-text addr1" value={form.address} onChange={(e) => set('address', e.target.value)} placeholder="주소 1" />
                 <input className="input-text addr2" value={form.addressDetail} onChange={(e) => set('addressDetail', e.target.value)} placeholder="주소 2" />
+              </td>
+            </tr>
+            {/* 기사 프로필: 배정할 때 참고 (거주 지역·이동 범위·전문 분야·장점/유의사항) */}
+            <tr>
+              <td className="label-col">거주 지역 / 이동·시공 범위</td>
+              <td className="input-col inline-fields">
+                <input className="input-text" value={form.region} onChange={(e) => set('region', e.target.value)} placeholder="예: 경기 남양주" maxLength={50} />
+                <input className="input-text" value={form.serviceArea} onChange={(e) => set('serviceArea', e.target.value)} placeholder="예: 서울 동부·경기 동부 (1시간 이내)" maxLength={100} style={{ minWidth: 240 }} />
+              </td>
+            </tr>
+            <tr>
+              <td className="label-col">전문 분야</td>
+              <td className="input-col">
+                <input className="input-text full" value={form.specialty} onChange={(e) => set('specialty', e.target.value)} placeholder="예: 간접조명 목공, 실링팬 설치, 배선 증설" maxLength={100} />
+              </td>
+            </tr>
+            <tr>
+              <td className="label-col">장점 · 유의사항</td>
+              <td className="input-col">
+                <textarea className="input-text full" rows={2} value={form.strengths} onChange={(e) => set('strengths', e.target.value)} placeholder="예: 마감이 꼼꼼함 / 주말 불가, 고층 작업 어려움" maxLength={500} />
               </td>
             </tr>
             <tr>

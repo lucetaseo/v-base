@@ -316,7 +316,7 @@ export function EngineerSettings({ path = '' }) {
         '계약에 배정된 적이 있는 기사는 삭제 시 기록 보존을 위해 “미사용” 처리됩니다.',
       ]}
       api={engineers}
-      searchKeys={['name', 'phone', 'loginId', 'address']}
+      searchKeys={['name', 'phone', 'region', 'serviceArea', 'specialty', 'loginId', 'address']}
       filters={[{ key: 'category', placeholder: '담당시공', options: currentWorkCategories(), match: (r, v) => (r.categories || []).includes(v) }]}
       removeConfirm={(r) => `[${r.name}] 기사를 삭제하시겠습니까?\n(배정 이력이 있으면 미사용 처리됩니다)`}
       onAdd={() => navigateForward('/settings/engineers/new')}
@@ -329,6 +329,7 @@ export function EngineerSettings({ path = '' }) {
         { key: 'hasPassword', label: '모바일 로그인', render: (r) => (r.loginId && r.hasPassword ? '가능' : <span className="sub-text">미설정</span>) },
         { key: 'phone', label: '연락처' },
         { key: 'address', label: '주소', className: 'text-left', render: (r) => [r.address, r.addressDetail].filter(Boolean).join(' ') || '-' },
+        { key: 'specialty', label: '지역 · 전문 분야', className: 'text-left', render: (r) => [r.serviceArea || r.region, r.specialty].filter(Boolean).join(' / ') || '-' },
         { key: 'active', label: '사용', render: (r) => (r.active === false ? <span className="text-red">미사용</span> : '사용') },
       ]}
       fields={[]}

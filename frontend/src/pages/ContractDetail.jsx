@@ -169,6 +169,16 @@ export default function ContractDetail({ contractId, initialTab, focus, onBack, 
   );
 
   // ---------------- 탭별 화면 ----------------
+  const toggleReview = async (done) => {
+    if (!done && !window.confirm('점검 완료를 취소할까요?')) return;
+    try {
+      await contractApi.setReview(selected.id, done);
+      await load();
+    } catch (e) {
+      handleError(e);
+    }
+  };
+
   const basicInfo = (
     <>
       <h3 className="form-section-title">&gt; 계약정보</h3>
@@ -180,7 +190,13 @@ export default function ContractDetail({ contractId, initialTab, focus, onBack, 
             <th>전화번호</th>
             <td>
               {head.customerPhone}
-              {head.customerPhone2 && <div className="sub-text">{head.customerPhone2}</div>}
+              {head.customerPhone2 && Number(head.primaryPhone) !== 2 && <span className="primary-star" title="주 연락처"> ★</span>}
+              {head.customerPhone2 && (
+                <div className="sub-text">
+                  {head.customerPhone2}
+                  {Number(head.primaryPhone) === 2 && <span className="primary-star" title="주 연락처"> ★</span>}
+                </div>
+              )}
             </td>
             <th>브랜드</th>
             <td>{head.brand}</td>
@@ -211,6 +227,37 @@ export default function ContractDetail({ contractId, initialTab, focus, onBack, 
               {selected.customerNote && <span className="sub-text"> (계약서에 고객에게 표시됨)</span>}
             </td>
           </tr>
+          {(selected.links || []).length > 0 && (
+            <tr>
+              <th>참고 링크</th>
+              <td colSpan={5}>
+                {selected.links.map((l, i) => (
+                  <a key={i} className="household-link" href={l.url} target="_blank" rel="noreferrer noopener">
+                    🔗 {l.title}
+                  </a>
+                ))}
+              </td>
+            </tr>
+          )}
+          {currentHasFeature('contractReview') && (
+            <tr>
+              <th>검수</th>
+              <td colSpan={5}>
+                {selected.review ? (
+                  <span className="review-done">
+                    ✔ 점검 완료 — {selected.review.byName} · {new Date(selected.review.at).toLocaleString('ko-KR')}
+                  </span>
+                ) : (
+                  <span className="text-orange">점검 전 (실물 계약서와 입력값을 대조한 뒤 [점검 완료]를 눌러 주세요)</span>
+                )}{' '}
+                {canDo('contract.edit') && !selected.deletedAt && (
+                  <button type="button" className={selected.review ? 'btn-link' : 'btn-dark-sm'} onClick={() => toggleReview(!selected.review)}>
+                    {selected.review ? '점검 완료 취소' : '점검 완료'}
+                  </button>
+                )}
+              </td>
+            </tr>
+          )}
           <tr>
             <th>실물 계약서</th>
             <td colSpan={5}>
@@ -227,6 +274,7 @@ export default function ContractDetail({ contractId, initialTab, focus, onBack, 
     list: (i) => contractApi.stepPhotos(selected.id, i),
     add: (i, photos) => contractApi.addStepPhotos(selected.id, i, photos),
     remove: (photoId) => contractApi.removeStepPhoto(selected.id, photoId),
+    update: (photoId, note) => contractApi.updateStepPhoto(selected.id, photoId, note),
   };
   const stepPhotoSection = selected && currentHasFeature('stepPhotos') && (
     <>
@@ -614,6 +662,7 @@ export default function ContractDetail({ contractId, initialTab, focus, onBack, 
                 </td>
                 <td className="sub-text">
                   {p.memo}
+                  {p.byName && <div>확인: {p.byName}</div>}
                   {p.createdAt && <div>{new Date(p.createdAt).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</div>}
                 </td>
                 {canDo('contract.edit') && (

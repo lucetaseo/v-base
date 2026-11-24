@@ -468,6 +468,16 @@ export default function ContractEditor({ contractId, prefillFrom, prefillCategor
               <td className="label-col">고객 연락처 ②</td>
               <td className="input-col">
                 <PhoneInput value={form.customerPhone2} onChange={(v) => set('customerPhone2', v)} />
+                {/* 주 연락처: ①(기본) 또는 ② — 계약 상세에 ★ 로 표시 */}
+                <div className="inline-fields primary-phone">
+                  <span className="sub-text">주 연락처</span>
+                  <label className="radio-item">
+                    <input type="radio" name="primaryPhone" checked={Number(form.primaryPhone || 1) !== 2} onChange={() => set('primaryPhone', 1)} /> ①
+                  </label>
+                  <label className="radio-item">
+                    <input type="radio" name="primaryPhone" checked={Number(form.primaryPhone) === 2} disabled={!form.customerPhone2} onChange={() => set('primaryPhone', 2)} /> ②
+                  </label>
+                </div>
               </td>
             </tr>
             <tr>
@@ -558,6 +568,14 @@ export default function ContractEditor({ contractId, prefillFrom, prefillCategor
                 <div className="sub-text text-blue">ⓘ 이 칸은 <b>고객에게 보입니다</b> (계약서·전자서명 화면). 내부 메모는 위 [기사전달사항]에 적어 주세요.</div>
               </td>
             </tr>
+            {currentHasFeature('householdLinks') && (
+              <tr>
+                <td className="label-col">세대 참고 링크</td>
+                <td className="input-col">
+                  <LinksEditor links={form.links || []} onChange={(links) => set('links', links)} />
+                </td>
+              </tr>
+            )}
           </tbody>
         </table>
 
@@ -1279,5 +1297,29 @@ function ProductSearch({ items, kind, label, onPick }) {
         </span>
       )}
     </span>
+  );
+}
+
+// 세대 참고 링크 (기능 householdLinks): 제목 + 주소 줄 여러 개 (최대 10개, http(s) 주소만 저장됨)
+function LinksEditor({ links, onChange }) {
+  const setRow = (i, patch) => onChange(links.map((l, j) => (j === i ? { ...l, ...patch } : l)));
+  return (
+    <div className="links-editor">
+      {links.map((l, i) => (
+        <div key={i} className="inline-fields link-row">
+          <input className="input-text" value={l.title || ''} onChange={(e) => setRow(i, { title: e.target.value })} placeholder="제목 (예: 도면 공유 폴더)" maxLength={50} />
+          <input className="input-text link-url" value={l.url || ''} onChange={(e) => setRow(i, { url: e.target.value })} placeholder="https://..." maxLength={500} />
+          <button type="button" className="btn-text-danger" onClick={() => onChange(links.filter((_, j) => j !== i))}>
+            삭제
+          </button>
+        </div>
+      ))}
+      {links.length < 10 && (
+        <button type="button" className="btn-dark-sm" onClick={() => onChange([...links, { title: '', url: '' }])}>
+          + 링크 추가
+        </button>
+      )}
+      <div className="sub-text">세대별 참고 링크 (도면·사진 공유 폴더, 제품 페이지 등). 사무실·기사만 봅니다.</div>
+    </div>
   );
 }

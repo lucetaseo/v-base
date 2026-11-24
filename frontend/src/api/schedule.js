@@ -34,7 +34,7 @@ import { DEFAULT_SCHEDULE_SETTINGS, MOBILE_STATUS, OFF_LABEL, hasFeature } from 
 import { inRange, isDateKey, today } from '../utils/date.js';
 import { calcAmounts, materialText, scopeOf, timeLabel } from '../utils/contract.js';
 import { formatAddress } from '../utils/format.js';
-import { addStepPhotos, listStepPhotos, removeStepPhoto } from './stepPhotos.js';
+import { addStepPhotos, listStepPhotos, removeStepPhoto, updateStepPhoto } from './stepPhotos.js';
 
 export const settingsOf = (company) => ({ ...DEFAULT_SCHEDULE_SETTINGS, ...(company?.scheduleSettings || {}) });
 
@@ -427,6 +427,7 @@ function engineerContractView(db, me, c) {
     items: c.items || '',
     customerNote: c.customerNote || '',
     engineerNote: c.engineerNote || '',
+    links: c.links || [], // 세대 참고 링크
     paperPhotoCount: c.paperPhotoCount || 0, // 실물 계약서 사진 수 (사진은 paperPhotos 로 따로)
     amounts: { actual: a.actual - a.canceled, paid: a.paid - a.refund, balance: a.balance }, // 현장 잔금 수령용 요약
     schedules: c.schedules.map((s, i) => ({
@@ -646,6 +647,16 @@ export const engineerApp = {
     if (count !== before) addHistory(c, user, '시공 사진 (기사)', [{ label: `${Number(stepIndex) + 1}차 사진`, from: `${before}장`, to: `${count}장` }]);
     saveDb(db);
     return { photoCount: count };
+  },
+
+  async updateStepPhoto(contractId, photoId, note = {}) {
+    const { db, user } = await authorizeEngineer();
+    requireFeature(db, user, 'stepPhotos');
+    const c = db.contracts.find((x) => x.id === Number(contractId) && x.companyId === user.companyId && !x.deletedAt);
+    if (!c || !c.schedules.some((s) => isMine(user, s))) throw new ApiError('본인에게 배정된 계약이 아닙니다.', 'FORBIDDEN');
+    updateStepPhoto(db, user, c, photoId, note, { onlyMine: true });
+    saveDb(db);
+    return { ok: true };
   },
 
   async removeStepPhoto(contractId, photoId) {

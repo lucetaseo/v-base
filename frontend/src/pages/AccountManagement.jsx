@@ -78,6 +78,8 @@ function SuperAdminView() {
       csPhone: '',
       mobile: '',
       quickPhone: '',
+      kakaoUrl: '',
+      csHours: '',
       brands: '',
       categories: [...LIGHTING_CATEGORIES], // 새 업체는 조명용 구분으로 시작 (아르떼)
       features: featureMap(null),
@@ -104,6 +106,9 @@ function SuperAdminView() {
       csPhone: f.csPhone || '',
       mobile: f.mobile || '',
       quickPhone: f.quickPhone || '',
+      // 고객 페이지 상담 버튼 (전화는 위 고객센터 csPhone)
+      kakaoUrl: f.kakaoUrl || '',
+      csHours: f.csHours || '',
       brands: f.brands.split(',').map((b) => b.trim()).filter(Boolean),
       categories: f.categories, // 시공 구분: 이 순서대로 계약 등록·검색·통계에 나옴
       features: f.features, // 기능 스위치: 이 업체에서 쓰는 기능만 켬
@@ -306,6 +311,14 @@ function SuperAdminView() {
           <Row label="주소">
             <input className="input-text full" value={companyForm.address} onChange={(e) => setCompanyForm({ ...companyForm, address: e.target.value })} />
           </Row>
+          {companyForm.features?.customerHelp !== false && (
+            <Row label="고객 상담 버튼">
+              <input className="input-text" placeholder="고객센터 전화" value={companyForm.csPhone || ''} onChange={(e) => setCompanyForm({ ...companyForm, csPhone: e.target.value })} />{' '}
+              <input className="input-text" placeholder="카카오톡 상담 주소 (https://pf.kakao.com/...)" value={companyForm.kakaoUrl || ''} onChange={(e) => setCompanyForm({ ...companyForm, kakaoUrl: e.target.value })} style={{ minWidth: 260 }} />{' '}
+              <input className="input-text" placeholder="상담 시간 (예: 평일 9시~18시)" value={companyForm.csHours || ''} onChange={(e) => setCompanyForm({ ...companyForm, csHours: e.target.value })} />
+              <div className="sub-text">고객 확인 페이지(/c)에 [전화 상담] [카카오톡 상담] 버튼과 상담 시간으로 보입니다.</div>
+            </Row>
+          )}
           {companyForm.features?.paintContract && (
             <>
               <Row label="업태 / 종목">
