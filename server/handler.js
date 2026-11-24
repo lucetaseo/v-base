@@ -19,6 +19,7 @@ import { AUDIT_KEEP_DAYS, buildAuditEntry, skipAudit, undoSnapshot } from '../fr
 import { hashPassword, verifyPassword } from './password.js';
 import { bootstrap } from './bootstrap.js';
 import { hasFeature } from '../frontend/src/constants.js';
+import { ocrConfigured, readContract } from './ocr.js';
 import { createUploadUrl, photoStoreConfigured, removeObjects, signDownloads, signPhotosIn } from './photoStore.js';
 import { COOKIE_NAME, decodeSession, encodeSession, parseCookies, sessionCookie } from './session.js';
 import { APP_HEADER, CO_HEADER, DEVICE_HEADER, appOf, mergeSession, viewSession } from '../frontend/src/api/sessionSlots.js';
@@ -62,6 +63,8 @@ setRuntimeAdapter({
     process.env.FILE_STORE_FAKE === '1'
       ? { configured: () => true, uploadUrl: async (p) => `fake://upload/${p}`, downloadUrls: async (items) => Object.fromEntries(items.map((x) => [x.path, `fake://download/${x.path}`])), remove: async () => {} }
       : { configured: photoStoreConfigured, uploadUrl: createUploadUrl, downloadUrls: signDownloads, remove: removeObjects },
+  // 계약서 스캔 (ANTHROPIC_API_KEY 는 서버 환경변수에만) — 시험(OCR_FAKE=1)은 가짜 값
+  ocr: { configured: ocrConfigured, readContract },
 });
 
 // 호출 가능한 서비스/함수 목록 (그 외는 거부)
@@ -115,6 +118,8 @@ const READ_ONLY = new Set([
   'contracts.group',
   'contracts.signBundle',
   'contracts.paperPhotos',
+  'contracts.scanStatus',
+  'contracts.scanPaper', // AI 가 읽는 동안(수십 초) 저장 잠금을 잡지 않게 (DB 는 안 바꿈)
   'contracts.asPhotos',
   'contracts.stepPhotos',
   'contracts.drawings',
@@ -169,6 +174,8 @@ const LIGHT_TABLES = {
   'engineers.list': [],
   'teams.list': ['teams'],
   'teams.addLightingTeams': ['teams'],
+  'contracts.scanStatus': [],
+  'contracts.scanPaper': [],
   'products.list': ['products'],
   'products.photo': ['products'],
   'products.setPhoto': ['products'],

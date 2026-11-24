@@ -75,6 +75,8 @@ export const FEATURES = [
   { key: 'photoStorage', label: '사진 전용 저장소 (새 사진을 DB 대신 사진 저장소에)', on: true },
   { key: 'stepPhotos', label: '시공 사진 (시공 1~4차 회차마다 사진 올리기 · 기사모바일·계약 상세)', on: true },
   { key: 'drawings', label: '시공 도면 (층별 도면에 조명 아이콘 배치 · 제품 연결 · 범례)', on: true },
+  { key: 'statement', label: '거래명세서 (계약 상세 → 인쇄 / PDF 저장, 공급자는 업체 정보)', on: false },
+  { key: 'contractScan', label: '계약서 스캔 (종이 계약서 사진 → AI 가 계약 등록 칸 채우기, 사람이 확인 후 저장 · 서버 키 필요)', on: false },
   { key: 'customerDrawings', label: '고객 도면 보기 (고객 확인 페이지에서 도면 · 아이콘 누르면 제품 사진·사양)', on: true },
   { key: 'contractReview', label: '계약 검수 (실물 계약서와 대조 후 [점검 완료] · 검수자·일시 기록)', on: true },
   { key: 'householdLinks', label: '세대 참고 링크 (계약마다 참고 링크 여러 개)', on: true },

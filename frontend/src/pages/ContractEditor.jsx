@@ -12,6 +12,7 @@ import { navigateForward, setLeaveGuard } from '../router.js';
 import MoneyInput from '../components/MoneyInput.jsx';
 import PaymentPhotos from '../components/PaymentPhotos.jsx';
 import PaperPhotos from '../components/PaperPhotos.jsx';
+import ContractScan from '../components/ContractScan.jsx';
 import EngineerPicker from '../components/EngineerPicker.jsx';
 import AptSearchInput from '../components/AptSearchInput.jsx';
 import PhoneInput from '../components/PhoneInput.jsx';
@@ -229,6 +230,21 @@ export default function ContractEditor({ contractId, prefillFrom, prefillCategor
   if (!form) return <div className="page-card page-loading">불러오는 중...</div>;
 
   const set = (name, value) => setForm((prev) => ({ ...prev, [name]: value }));
+  // 계약서 스캔(AI) 결과 넣기 — 읽은(빈 값이 아닌) 칸만, 품목이 있으면 품목 줄로 (총 금액은 품목 합계), 메모는 뒤에 붙임
+  const applyScan = (v, image) => {
+    setForm((prev) => {
+      const next = { ...prev };
+      ['customerName', 'customerPhone', 'customerPhone2', 'aptName', 'dong', 'ho', 'contractDate', 'moveInDate'].forEach((k) => {
+        if (String(v[k] || '').trim()) next[k] = String(v[k]).trim();
+      });
+      if (v.lineItems?.length) next.lineItems = v.lineItems.map((l) => ({ productId: null, name: l.name, detail: '', qty: l.qty, unitPrice: l.unitPrice }));
+      else if (v.totalAmount) next.totalAmount = String(v.totalAmount);
+      if (v.discount) next.discount = String(v.discount);
+      if (String(v.memo || '').trim()) next.memo = [prev.memo, `[계약서 스캔] ${v.memo.trim()}`].filter(Boolean).join('\n');
+      return next;
+    });
+    if (image) setPaper((p) => ({ ...p, add: [...p.add, image] }));
+  };
   const onField = (e) => set(e.target.name, e.target.value);
   const setStep = (i, patch) =>
     setForm((prev) => ({ ...prev, schedules: prev.schedules.map((s, j) => (j === i ? { ...s, ...patch } : s)) }));
@@ -404,6 +420,7 @@ export default function ContractEditor({ contractId, prefillFrom, prefillCategor
       <form onSubmit={handleSave}>
         {/* ---------------- 1. 계약정보 ---------------- */}
         <h3 className="form-section-title">&gt; 계약정보 {isEdit ? `수정 (No.${contract.no})` : '등록'}</h3>
+        {!isEdit && currentHasFeature('contractScan') && <ContractScan onApply={applyScan} onError={handleError} />}
         {isEdit && contract.esign?.status === '서명완료' && (
           <p className="warn-box">ⓘ 서명이 완료된 계약입니다. 고쳐도 다시 서명받지 않으며, 고객이 받은 계약서 링크에는 고친 내용이 보입니다.</p>
         )}
