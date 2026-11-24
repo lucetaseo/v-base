@@ -1,13 +1,15 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import { compressImage } from '../utils/image.js';
 import { PLAN_ACCEPT, planPages } from '../utils/planFile.js';
 
 // 시공 도면 (계약 상세 > 시공관리, 기능 drawings) — 아르떼(조명)
-//   층별 도면(그림) 위에 조명 아이콘을 놓고(누르기) · 옮기고(끌기) · 지우기, 확대·축소, 범례, 계약 상품 줄과 연결
+//   공간별 도면(거실·안방·베란다 …) 위에 조명 아이콘을 놓고(누르기) · 옮기고(끌기) · 지우기, 확대·축소, 범례, 계약 상품 줄과 연결
 //   api: { list(), save({ drawingId, name, image, w, h, icons, shapes }), remove(drawingId) }
 //   도형·선·글자(shapes): 사각형·원·선·화살표·글자 — 끌어서 그리고, 고르면 양 끝 손잡이로 크기 조절, 끌어서 옮김
 //   lines: 계약 상품 줄 (아이콘 ↔ 제품 연결, 범례에서 계약 수량과 비교)
 //   canEdit: false 면 보기만 (아이콘을 누르면 설명)
+//   deferred: 계약 등록·수정 화면용 — 자체 [저장] 버튼 없이 api(화면 보관함)에 바로 넣고, 계약 [저장] 때 함께 저장
+//     ref.flush(): 고치는 중인 아이콘·도형을 보관함에 넣음 (계약 저장 직전에 부름)
 //   renderInfo(icon, line): 보기 전용에서 아이콘을 눌렀을 때 보일 내용 (고객 화면: 제품 사진·사양 카드)
 export const ICONS = {
   downlight: { label: '다운라이트', short: 'DL', color: '#f59e0b' },
@@ -34,6 +36,15 @@ export const SHAPES = {
   text: { label: '글자', mark: 'T' },
 };
 const SHAPE_COLORS = ['#ef4444', '#2563eb', '#16a34a', '#111827', '#f59e0b', '#9333ea'];
+// 도면 이름 — 공간별로 나눔. 새 도면은 아직 안 쓴 이름을 차례로 제안 (직접 입력도 됨)
+export const SPACE_NAMES = ['거실', '안방', '작은방', '작은방2', '주방', '베란다', '현관', '욕실', '드레스룸', '복도', '서재', '다용도실'];
+const nextSpaceNames = (used, n) => {
+  const out = [];
+  const taken = new Set(used);
+  for (const s of SPACE_NAMES) if (out.length < n && !taken.has(s)) out.push(s);
+  for (let k = 1; out.length < n; k++) if (!taken.has(`공간 ${k}`)) out.push(`공간 ${k}`);
+  return out;
+};
 const isShapeTool = (t) => typeof t === 'string' && t.startsWith('shape:');
 
 export function DrawingIcon({ type, selected, title, onPointerDown, onClick, style }) {
@@ -55,7 +66,7 @@ export function DrawingIcon({ type, selected, title, onPointerDown, onClick, sty
 const lineLabel = (lines, i) => (i === null || i === undefined || !lines[i] ? '' : `${lines[i].name}${lines[i].qty > 1 ? ` (계약 ${lines[i].qty}개)` : ''}`);
 const newId = () => `i${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 
-export default function DrawingEditor({ api, lines = [], canEdit = false, onError, renderInfo }) {
+export default forwardRef(function DrawingEditor({ api, lines = [], canEdit = false, onError, renderInfo, deferred = false }, ref) {
   const [list, setList] = useState(null);
   const [activeId, setActiveId] = useState(null);
   const [icons, setIcons] = useState([]); // 고치는 중인 아이콘 (저장 전)
@@ -91,9 +102,27 @@ export default function DrawingEditor({ api, lines = [], canEdit = false, onErro
     load();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const confirmLeave = () => !dirty || window.confirm('저장하지 않은 변경(아이콘·도형)이 있습니다. 버리고 넘어갈까요?');
-  const pick = (d) => {
-    if (d.id === activeId || !confirmLeave()) return;
+  // 고치는 중인 도면을 두고 넘어갈 때: 보관(deferred)이면 보관함에 넣고, 아니면 버릴지 물어봄
+  const flush = async () => {
+    if (dirty && active) await api.save({ drawingId: active.id, icons, shapes });
+    setDirty(false);
+  };
+  useImperativeHandle(ref, () => ({ flush, isDirty: () => dirty }));
+  const confirmLeave = async () => {
+    if (!dirty) return true;
+    if (deferred) {
+      await flush();
+      return true;
+    }
+    return window.confirm('저장하지 않은 변경(아이콘·도형)이 있습니다. 버리고 넘어갈까요?');
+  };
+  const pick = async (d) => {
+    if (d.id === activeId || !(await confirmLeave())) return;
+    if (deferred) {
+      await load(d.id);
+      setZoom(1);
+      return;
+    }
     setActiveId(d.id);
     setIcons(d.icons || []);
     setShapes(d.shapes || []);
@@ -130,14 +159,15 @@ export default function DrawingEditor({ api, lines = [], canEdit = false, onErro
   const addPages = async (pages, askName) => {
     let name = '';
     if (askName) {
-      name = window.prompt('도면 이름 (예: 1층, 2층, 거실)', `${(list?.length || 0) + 1}층`);
+      name = window.prompt(`도면 이름 (공간 — 예: ${SPACE_NAMES.slice(0, 6).join(', ')})`, nextSpaceNames((list || []).map((d) => d.name), 1)[0]);
       if (name === null) return;
     }
     let lastId = null;
+    const autoNames = nextSpaceNames((list || []).map((d) => d.name), pages.length); // 여러 장: 거실·안방… 차례로 (나중에 [이름 바꾸기])
     try {
       for (let i = 0; i < pages.length; i++) {
         setBusy(`도면 올리는 중 ${pages.length > 1 ? `${i + 1}/${pages.length}` : ''}`);
-        const r = await api.save({ name: name || `${(list?.length || 0) + i + 1}층`, ...(await readImage(pages[i].file)), icons: [], shapes: [] });
+        const r = await api.save({ name: name || autoNames[i], ...(await readImage(pages[i].file)), icons: [], shapes: [] });
         lastId = r.drawing.id;
       }
     } catch (err) {
@@ -163,7 +193,7 @@ export default function DrawingEditor({ api, lines = [], canEdit = false, onErro
   const addDrawing = async (e) => {
     const file = e.target.files?.[0];
     e.target.value = '';
-    if (!file || !confirmLeave()) return;
+    if (!file || !(await confirmLeave())) return;
     const pages = await openPlanFile(file);
     if (!pages) return;
     if (pages.length === 1) return addPages(pages, true);
@@ -211,6 +241,7 @@ export default function DrawingEditor({ api, lines = [], canEdit = false, onErro
   };
 
   const save = async () => {
+    if (!window.confirm(`[${active.name}] 도면을 저장하시겠습니까?`)) return;
     setBusy('저장하는 중...');
     try {
       await api.save({ drawingId: active.id, icons, shapes });
@@ -427,9 +458,13 @@ export default function DrawingEditor({ api, lines = [], canEdit = false, onErro
                   <button type="button" onClick={() => setZoom(1)}>{Math.round(zoom * 100)}%</button>
                   <button type="button" onClick={() => setZoom((z) => Math.min(4, Math.round((z + 0.2) * 10) / 10))}>＋</button>
                 </span>
-                <button type="button" className="btn-dark-sm" onClick={save} disabled={!dirty || !!busy}>
-                  {dirty ? '💾 저장' : '저장됨'}
-                </button>
+                {deferred ? (
+                  <span className="sub-text">{dirty ? '✎ 고치는 중 — ' : ''}계약 [저장] 때 함께 저장됩니다</span>
+                ) : (
+                  <button type="button" className="btn-dark-sm" onClick={save} disabled={!dirty || !!busy}>
+                    {dirty ? '💾 도면 저장' : '저장됨'}
+                  </button>
+                )}
                 <button type="button" className="btn-link" onClick={rename}>이름 바꾸기</button>
                 <label className="btn-link">
                   그림 바꾸기
@@ -556,9 +591,9 @@ export default function DrawingEditor({ api, lines = [], canEdit = false, onErro
       )}
     </div>
   );
-}
+});
 
-// PDF·PPT 에서 도면으로 쓸 페이지 고르기 (추가: 여러 장 → 층마다 도면, 바꾸기: 1장)
+// PDF·PPT 에서 도면으로 쓸 페이지 고르기 (추가: 여러 장 → 공간마다 도면, 바꾸기: 1장)
 function PageChooser({ chooser, setChooser, onDone }) {
   const [urls] = useState(() => chooser.pages.map((p) => URL.createObjectURL(p.file)));
   useEffect(() => () => urls.forEach((u) => URL.revokeObjectURL(u)), [urls]);
@@ -640,5 +675,45 @@ function ShapeLayer({ w, h, shapes, sel, canEdit, onDown }) {
         );
       })}
     </svg>
+  );
+}
+
+// 보기 전용 도면 한 장 (계약서 안·인쇄용) — 화면 폭에 맞춰 그림 + 도형·글자 + 아이콘 + 범례
+export function DrawingView({ drawing: d, lines = [] }) {
+  const icons = d.icons || [];
+  const byType = TYPES.map((t) => [t, icons.filter((ic) => ic.type === t).length]).filter(([, n]) => n);
+  const byLine = lines.map((l, i) => ({ l, n: icons.filter((ic) => ic.line === i).length })).filter((x) => x.n);
+  return (
+    <div className="dwg-view">
+      <div className="dwg-board dwg-board-view">
+        <img src={d.image} alt={d.name} draggable={false} />
+        <ShapeLayer w={d.w || 1000} h={d.h || 700} shapes={d.shapes || []} sel={null} canEdit={false} onDown={() => {}} />
+        {icons.map((ic) => (
+          <DrawingIcon key={ic.id} type={ic.type} title={[ICONS[ic.type]?.label, lineLabel(lines, ic.line)].filter(Boolean).join(' · ')} style={{ left: `${ic.x}%`, top: `${ic.y}%`, pointerEvents: 'none' }} />
+        ))}
+      </div>
+      {(byType.length > 0 || byLine.length > 0) && (
+        <div className="dwg-legend">
+          {byType.length > 0 && (
+            <div>
+              <b>범례</b>{' '}
+              {byType.map(([t, n]) => (
+                <span key={t} className="dwg-legend-item">
+                  <DrawingIcon type={t} style={{ position: 'static', transform: 'none', pointerEvents: 'none' }} /> {ICONS[t].label} {n}개
+                </span>
+              ))}
+            </div>
+          )}
+          {byLine.length > 0 && (
+            <div className="dwg-legend-lines">
+              <b>제품</b>
+              {byLine.map(({ l, n }, i) => (
+                <span key={i} className="dwg-legend-item">{l.name} {n}개</span>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
   );
 }

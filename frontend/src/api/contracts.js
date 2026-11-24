@@ -1265,6 +1265,15 @@ const signUrlOf = (token) => `${publicBaseUrl().replace(/\/+$/, '')}/sign/${toke
 // ============================================================
 
 export const esign = {
+  // 계약서에 함께 넣는 시공 도면 (기능 drawings + drawingsInContract) — 서명 링크로 보는 고객용, 아이콘 메모는 뺌
+  async drawings(token) {
+    const db = await loadDb();
+    const list = bundleByToken(db, token);
+    const company = db.companies.find((x) => x.id === list[0].companyId);
+    if (!hasFeature(company, 'drawings') || !hasFeature(company, 'drawingsInContract')) return [];
+    return list.filter((c) => (c.drawings || []).length).map((c) => drawingGroup(db, c, { forCustomer: true }));
+  },
+
   // 한 링크에 묶인 계약들(줄눈·청소 등)을 한 장의 계약서로
   async getByToken(token) {
     const db = await loadDb();
@@ -1279,6 +1288,8 @@ export const esign = {
         if (signature) view.esign.signature = signature; // 서명 완료 후에는 고객 본인 서명 표시
       } else delete view.esign.signature;
       delete view.history;
+      // 도면 아이콘의 사무실 메모는 고객에게 보이지 않게
+      if (view.drawings) view.drawings = view.drawings.map((d) => ({ ...d, icons: (d.icons || []).map(({ note, ...ic }) => ic) })); // eslint-disable-line no-unused-vars
       delete view.memo; // 내부 메모는 고객에게 노출하지 않음
       delete view.happyCallMemo;
       delete view.notes;
@@ -1622,6 +1633,24 @@ export const customerApp = {
     await setSession(keep);
   },
 };
+
+// 계약서에 넣는 도면 묶음: 계약 하나의 도면들 + 상품 줄(이름·수량)
+function drawingGroup(db, c, { forCustomer = false } = {}) {
+  return {
+    contractId: c.id,
+    category: c.category,
+    lines: (c.lineItems || []).map((l) => ({ name: l.name, qty: l.qty })),
+    drawings: listDrawings(db, c).map(({ id, name, image, w, h, icons, shapes }) => ({
+      id,
+      name,
+      image,
+      w,
+      h,
+      shapes: shapes || [],
+      icons: (icons || []).map(({ note, ...ic }) => (forCustomer ? ic : { ...ic, note })),
+    })),
+  };
+}
 
 // 통계 시공기사별에서 여러 기사가 나눠 맡은 계약의 금액을 모으는 줄 이름
 export const SHARED_ROW = '여러 기사 공동 시공';

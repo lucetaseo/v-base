@@ -6754,3 +6754,28 @@ a.import-no:hover {
     grid-template-columns: 1fr;
   }
 }
+
+/* 계약서 안 시공 도면 (보기·인쇄) */
+.contract-drawings {
+  margin-top: 16px;
+}
+.contract-drawing {
+  margin-top: 14px;
+  break-inside: avoid;
+}
+.contract-drawing-title {
+  margin: 0 0 6px;
+  font-size: 15px;
+}
+.dwg-board-view {
+  width: 100%;
+}
+@media print {
+  .contract-drawing {
+    break-before: page;
+  }
+  .dwg-view .dwg-icon {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+}
