@@ -2,12 +2,12 @@ import React, { useCallback, useEffect, useState, useRef } from 'react';
 import PhotoPickButton from '../components/CameraButton.jsx';
 import { contracts as contractApi } from '../api/index.js';
 import { useAuth } from '../auth/AuthContext.jsx';
-import { BRANDS, CATEGORIES } from '../constants.js';
+import { BRANDS, currentHasFeature, currentWorkCategories } from '../constants.js';
 
 const TALK_BRAND_ORDER = ['더좋은집', '더스타트']; // 상세시공 알림톡 버튼: 더좋은집이 위 (PC·태블릿·모바일 공통)
 import { calcAmounts, isRefund, kindBreakdown, sumAmounts, timeLabel } from '../utils/contract.js';
 import { formatAddress, won } from '../utils/format.js';
-import AsModal from '../components/AsModal.jsx';
+import AsModal, { sendAs } from '../components/AsModal.jsx';
 import KakaoModal from '../components/KakaoModal.jsx';
 import PaymentModal from '../components/PaymentModal.jsx';
 import DiscountModal from '../components/DiscountModal.jsx';
@@ -15,11 +15,13 @@ import { backdrop } from '../utils/backdrop.js';
 import ContractViewModal from '../components/ContractViewModal.jsx';
 import { PAPER_MAX } from '../components/PaperPhotos.jsx';
 import PhotoViewer from '../components/PhotoViewer.jsx';
+import StepPhotos from '../components/StepPhotos.jsx';
 import LineItems from '../components/LineItems.jsx';
+import MapLink from '../components/MapLink.jsx';
 import WorkRecord from '../components/WorkRecord.jsx';
 import { compressImage } from '../utils/image.js';
 
-const CIRCLED = ['①', '②', '③'];
+const CIRCLED = ['①', '②', '③', '④'];
 const TABS = ['계약정보', '계약자', '시공관리', '상담내역'];
 
 const siteText = (c) =>
@@ -38,7 +40,7 @@ const scheduleLine = (s) => (s?.date ? `${s.date}(${timeLabel(s) || '무관'})` 
 //   onOpenGroup(contractId)   다른 현장 계약으로 이동 (계약자 탭)
 //   initialTab                처음 열 탭 (상담홈의 [상담내역] → '상담내역')
 //   focus                     'progress' 면 진행상황(기사 시공 기록)으로 바로 스크롤 (시공 기록 [자세히 보기])
-export default function ContractDetail({ contractId, initialTab, focus, onBack, onEdit, onNewWork, onOpenGroup }) {
+export default function ContractDetail({ contractId, initialTab, focus, onBack, onEdit, onNewWork, onOpenGroup, engineers = [] }) {
   const { company, can, handleError } = useAuth();
   // 다른 사람 계약('본인 계약만' 실장): 보기만 — 서버가 readOnly 로 알려 줌
   const canDo = (perm, c = selected) => can(perm) && !c?.readOnly;
@@ -189,7 +191,9 @@ export default function ContractDetail({ contractId, initialTab, focus, onBack, 
             <th>계약담당</th>
             <td>{head.ownerName}</td>
             <th>현장</th>
-            <td>{siteText(head)}</td>
+            <td>
+              {siteText(head)} <MapLink name={head.aptName} />
+            </td>
           </tr>
           <tr>
             <th>입주예정일</th>
@@ -199,12 +203,7 @@ export default function ContractDetail({ contractId, initialTab, focus, onBack, 
             <th>현금영수증</th>
             <td>{head.cashReceipt}</td>
           </tr>
-          {String(head.memo || '').trim() && (
-            <tr>
-              <th>기타사항 (예전)</th>
-              <td colSpan={5} className="pre-wrap">{head.memo}</td>
-            </tr>
-          )}
+          {/* 예전 프로그램의 '기타사항'(계약메모·서비스)은 화면에 보이지 않게 — 기록(memo)은 그대로 보관 */}
           <tr>
             <th>고객 참고사항</th>
             <td colSpan={5} className="pre-wrap">
@@ -220,6 +219,33 @@ export default function ContractDetail({ contractId, initialTab, focus, onBack, 
           </tr>
         </tbody>
       </table>
+    </>
+  );
+
+  // 시공 사진 (기능 stepPhotos): 고른 시공의 회차마다 — 날짜가 있거나 사진이 있는 회차 (①은 항상)
+  const stepPhotoApi = selected && {
+    list: (i) => contractApi.stepPhotos(selected.id, i),
+    add: (i, photos) => contractApi.addStepPhotos(selected.id, i, photos),
+    remove: (photoId) => contractApi.removeStepPhoto(selected.id, photoId),
+  };
+  const stepPhotoSection = selected && currentHasFeature('stepPhotos') && (
+    <>
+      <h3 className="form-section-title">&gt; 시공 사진 — {selected.category}</h3>
+      {(selected.schedules || [])
+        .map((s, i) => ({ s, i }))
+        .filter(({ s, i }) => i === 0 || s.date || s.photoCount)
+        .map(({ s, i }) => (
+          <StepPhotos
+            key={`${selected.id}-${i}`}
+            api={stepPhotoApi}
+            stepIndex={i}
+            label={`${CIRCLED[i]} ${i + 1}차${s.date ? ` (${s.date})` : ''}`}
+            count={s.photoCount || 0}
+            canUpload={canDo('contract.edit', selected)}
+            canDelete={() => canDo('contract.edit', selected)}
+            onError={handleError}
+          />
+        ))}
     </>
   );
 
@@ -245,7 +271,7 @@ export default function ContractDetail({ contractId, initialTab, focus, onBack, 
           <tr>
             <th>시공 등록</th>
             <td colSpan={2}>
-              {[0, 1, 2].map((i) => (
+              {[0, 1, 2, 3].map((i) => (
                 <div key={i}>
                   {CIRCLED[i]} : {scheduleLine(selected.schedules[i])}
                 </div>
@@ -253,7 +279,7 @@ export default function ContractDetail({ contractId, initialTab, focus, onBack, 
             </td>
             <th>시공담당</th>
             <td colSpan={2}>
-              {[0, 1, 2].map((i) => (
+              {[0, 1, 2, 3].map((i) => (
                 <div key={i}>
                   {CIRCLED[i]} : {selected.schedules[i]?.assigneeName || ''}
                   {selected.schedules[i]?.mobileStatus && <span className="mobile-chip">{selected.schedules[i].mobileStatus}</span>}
@@ -264,11 +290,11 @@ export default function ContractDetail({ contractId, initialTab, focus, onBack, 
           <tr>
             <th>패키지</th>
             <td colSpan={3}>
-              <LineItems lines={(selected.lineItems || [])} kind="패키지" />
+              <LineItems lines={(selected.lineItems || [])} kind="패키지" showTotal={showAmount && currentHasFeature('lineAmounts')} />
             </td>
             <th>추가시공품목</th>
             <td>
-              <LineItems lines={(selected.lineItems || [])} kind="추가시공품목" extra={selected.items} />
+              <LineItems lines={(selected.lineItems || [])} kind="추가시공품목" extra={selected.items} showTotal={showAmount && currentHasFeature('lineAmounts')} />
             </td>
           </tr>
           {showAmount && (
@@ -325,7 +351,7 @@ export default function ContractDetail({ contractId, initialTab, focus, onBack, 
               <th>추가시공품목</th>
               <th>시공 등록</th>
               <th>시공기사</th>
-              <th>알림톡</th>
+              {currentHasFeature('alimtalk') && <th>알림톡</th>}
               <th>관리</th>
             </tr>
           </thead>
@@ -335,7 +361,7 @@ export default function ContractDetail({ contractId, initialTab, focus, onBack, 
                 key={c.id}
                 className={`selectable-row ${c.id === selected.id ? 'selected-row' : ''}`}
                 onClick={() => setSelectedId(c.id)}
-                title="누르면 위 시공정보에 표시됩니다"
+                title="누르면 아래 시공정보에 표시됩니다"
               >
                 <td>{c.no ?? '-'}</td>
                 <td className="nowrap">
@@ -346,6 +372,9 @@ export default function ContractDetail({ contractId, initialTab, focus, onBack, 
                     <div key={i} className={`sub-text as-request ${l.doneAt ? 'done' : ''}`}>
                       AS {i + 1}회 {l.date} · {l.request}
                       {l.doneAt && ` (완료 ${l.doneAt})`}
+                      {l.engineerName && ` · 담당 ${l.engineerName}`}
+                      {!l.doneAt && l.engineerName && (l.visitDate ? ` · 방문 ${l.visitDate}${l.visitTime ? ` ${l.visitTime}` : ''}` : ' · 방문일 미정')}
+                      {l.mobileStatus && ` · 기사 보고: ${l.mobileStatus}${l.mobileMemo ? ` (${l.mobileMemo})` : ''}`}
                       {l.photoCount > 0 && (
                         <button
                           type="button"
@@ -368,20 +397,20 @@ export default function ContractDetail({ contractId, initialTab, focus, onBack, 
                   <LineItems lines={c.lineItems} kind="추가시공품목" withDetail={false} extra={c.items} />
                 </td>
                 <td className="text-left nowrap">
-                  {[0, 1, 2].map((i) => (
+                  {[0, 1, 2, 3].map((i) => (
                     <div key={i}>
                       {CIRCLED[i]} {scheduleLine(c.schedules[i])}
                     </div>
                   ))}
                 </td>
                 <td className="text-left nowrap">
-                  {[0, 1, 2].map((i) => (
+                  {[0, 1, 2, 3].map((i) => (
                     <div key={i}>
                       {CIRCLED[i]} : {c.schedules[i]?.assigneeName || ''}
                     </div>
                   ))}
                 </td>
-                {(
+                {currentHasFeature('alimtalk') && (
                   <td onClick={(e) => e.stopPropagation()}>
                     <div className="talk-btn-grid">
                       {talkBrands.map((b) =>
@@ -399,12 +428,12 @@ export default function ContractDetail({ contractId, initialTab, focus, onBack, 
                     {canDo('contract.edit', c) && (
                       <button type="button" className="btn-dark-action" onClick={() => onEdit(c)}>수정</button>
                     )}
-                    {canDo('contract.edit', c) && (
+                    {canDo('contract.edit', c) && currentHasFeature('as') && (
                       <button type="button" className="btn-outline-action" onClick={() => setAsTarget(c)}>
                         {c.asAt ? 'AS 추가 접수' : 'AS 접수'}
                       </button>
                     )}
-                    {canDo('contract.edit', c) && c.asAt && asLogsOf(c).some((l) => !l.doneAt) && (
+                    {canDo('contract.edit', c) && currentHasFeature('as') && c.asAt && asLogsOf(c).some((l) => !l.doneAt) && (
                       <button type="button" className="btn-outline-action" onClick={() => finishAs(c)}>
                         AS 완료
                       </button>
@@ -423,7 +452,7 @@ export default function ContractDetail({ contractId, initialTab, focus, onBack, 
       {can('contract.create') && (
         <div className="section-actions">
           <span className="add-work-label">시공등록</span>
-          {CATEGORIES.filter((c) => c !== '기타').map((cat) => (
+          {currentWorkCategories().map((cat) => (
             <button key={cat} type="button" className="btn-dark-lg sm add-work-btn" onClick={() => onNewWork(head, cat)}>
               + {cat}
             </button>
@@ -671,7 +700,7 @@ export default function ContractDetail({ contractId, initialTab, focus, onBack, 
             {t}
           </button>
         ))}
-        {/* 탭 옆 [수정]: 지금 보고 있는 시공(위 시공정보의 계약)을 바로 수정 */}
+        {/* 탭 옆 [수정]: 지금 보고 있는 시공(시공정보의 계약)을 바로 수정 */}
         {canDo('contract.edit') && !selected.deletedAt && (
           <button type="button" className="detail-edit-btn" onClick={() => onEdit(selected)} title={`No.${selected.no} ${selected.category} 수정`}>
             ✏️ 수정
@@ -681,11 +710,12 @@ export default function ContractDetail({ contractId, initialTab, focus, onBack, 
 
       {tab === '시공관리' && (
         <>
-          {/* 계약 등록 화면과 같은 순서: 계약정보 → 시공내역·금액 → 시공정보 */}
+          {/* 순서: 계약정보 → 시공내역·금액 → 상세시공(시공 목록) → 시공정보(고른 시공) */}
           {basicInfo}
           {amountSection}
-          {workInfo}
           {workList}
+          {workInfo}
+          {stepPhotoSection}
           {progressSection}
         </>
       )}
@@ -855,9 +885,11 @@ export default function ContractDetail({ contractId, initialTab, focus, onBack, 
       {asTarget && (
         <AsModal
           title={`${asTarget.category} · ${asTarget.customerName} (No.${asTarget.no}) — ${asLogsOf(asTarget).length + 1}회차`}
+          engineers={engineers}
+          defaultEngineerId={asTarget.schedules?.[0]?.assignType !== 'team' ? asTarget.schedules?.[0]?.engineerId : undefined}
           onClose={() => setAsTarget(null)}
           onSave={async (info) => {
-            await contractApi.setAs([asTarget.id], true, info);
+            await sendAs(contractApi, [asTarget.id], info);
             setAsTarget(null);
             alert(asTarget.asAt ? 'AS를 추가 접수했습니다.' : 'AS관리로 옮겼습니다. (계약관리 > AS관리)');
             await load();

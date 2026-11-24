@@ -25,14 +25,16 @@ import {
   nowIso,
   session,
   readableContracts,
+  requireFeature,
 } from './core.js';
 import { addHistory, assigneeOf, contractView } from './views.js';
 import { ROLES, can } from '../auth/permissions.js';
 import { numberOf } from './numbering.js';
-import { DEFAULT_SCHEDULE_SETTINGS, MOBILE_STATUS, OFF_LABEL } from '../constants.js';
+import { DEFAULT_SCHEDULE_SETTINGS, MOBILE_STATUS, OFF_LABEL, hasFeature } from '../constants.js';
 import { inRange, isDateKey, today } from '../utils/date.js';
 import { calcAmounts, materialText, scopeOf, timeLabel } from '../utils/contract.js';
 import { formatAddress } from '../utils/format.js';
+import { addStepPhotos, listStepPhotos, removeStepPhoto } from './stepPhotos.js';
 
 export const settingsOf = (company) => ({ ...DEFAULT_SCHEDULE_SETTINGS, ...(company?.scheduleSettings || {}) });
 
@@ -304,6 +306,7 @@ export const fairs = {
   // from~to 와 겹치는 박람회 (여러 날 박람회는 기간이 겹치면 포함) — 본인이 포함된 것만 (관리자는 전부)
   async list({ from, to } = {}) {
     const { db, user } = await authorizeAny(['schedule.view', 'fair.manage']);
+    if (!hasFeature(companyOf(db, user), 'fair')) return []; // 기능 꺼진 업체: 달력에 박람회 없음
     // 관리자·'박람회 일정' 권한이 있는 실장은 전부 (등록·관리하는 사람), 그 외는 본인 포함·본인이 등록한 것만
     const all = user.role === ROLES.ADMIN || can(user, 'fair.manage');
     const mine = (f) => all || (f.staffIds || []).includes(user.id) || f.createdBy === user.id;
@@ -316,6 +319,7 @@ export const fairs = {
   // 등록(id 없음) / 수정(id 있음)
   async save(data = {}) {
     const { db, user } = await authorize('fair.manage');
+    requireFeature(db, user, 'fair');
     const company = companyOf(db, user);
     const date = String(data.date || '');
     const endDate = data.endDate ? String(data.endDate) : '';
@@ -349,6 +353,7 @@ export const fairs = {
 
   async remove(id) {
     const { db, user } = await authorize('fair.manage');
+    requireFeature(db, user, 'fair');
     const company = companyOf(db, user);
     const before = (company.fairs || []).length;
     company.fairs = (company.fairs || []).filter((f) => f.id !== Number(id));
@@ -385,6 +390,7 @@ function mySchedule(db, me, c, s, stepIndex) {
     customerName: c.customerName,
     customerPhone: c.customerPhone,
     address: formatAddress(c),
+    aptName: c.aptName || '', // [지도] 검색용 (동·호 없이)
     items: [...(c.lineItems || []).map((l) => `${l.name}${l.qty > 1 ? ` x${l.qty}` : ''}`), c.items].filter(Boolean).join('\n'),
     balance: a.balance, // 현장 잔금 수령용
   };
@@ -415,6 +421,7 @@ function engineerContractView(db, me, c) {
     aptType: c.aptType || '',
     area: c.area || '',
     address: formatAddress(c),
+    aptName: c.aptName || '', // [지도] 검색용 (동·호 없이)
     moveInDate: c.moveInDate || '',
     lineItems: (c.lineItems || []).map((l) => ({ name: l.name, detail: l.detail || '', qty: l.qty, ...(l.kind ? { kind: l.kind } : {}) })),
     items: c.items || '',
@@ -433,6 +440,7 @@ function engineerContractView(db, me, c) {
       mobileStatus: s.mobileStatus || '',
       mobileMemo: isMine(me, s) ? s.mobileMemo || '' : '',
       reportedAt: s.reportedAt,
+      photoCount: s.photoCount || 0, // 시공 사진 장수 (사진은 stepPhotos 로 따로)
       ...(isMine(me, s) ? { scope: scopeOf(c), workRecord: s.workRecord || null } : {}),
     })),
   };
@@ -451,6 +459,35 @@ export const engineerApp = {
         if (s.date && inRange(s.date, from, to) && isMine(user, s)) out.push(mySchedule(db, user, c, s, i));
       }),
     );
+    // 방문일을 등록한 내 AS 도 일정에 (카드에 'AS' 표시)
+    if (hasFeature(companyOf(db, user), 'asEngineer')) {
+      activeContracts(db, user.companyId).forEach((c) =>
+        (c.asLogs || []).forEach((l, asIndex) => {
+          // 완료된 AS 도 그날 일정에 남김 (보고 결과 확인용) — 담당이 바뀐 회차는 빠짐
+          if (l.engineerId !== user.engineerId || !l.visitDate || !inRange(l.visitDate, from, to)) return;
+          out.push({
+            isAs: true,
+            asIndex,
+            stepIndex: -1,
+            contractId: c.id,
+            date: l.visitDate,
+            time: l.visitTime || '',
+            category: c.category,
+            workType: 'AS',
+            customerName: c.customerName,
+            customerPhone: c.customerPhone,
+            address: formatAddress(c),
+            aptName: c.aptName || '',
+            request: l.request,
+            photoCount: l.photoCount || 0,
+            mobileStatus: l.mobileStatus || '',
+            mobileMemo: l.mobileMemo || '',
+            reportedAt: l.reportedAt || '',
+            doneAt: l.doneAt || '',
+          });
+        }),
+      );
+    }
     return out.sort((a, b) => a.date.localeCompare(b.date) || (a.time || '').localeCompare(b.time || ''));
   },
 
@@ -482,6 +519,157 @@ export const engineerApp = {
       .map((r) => ({ id: r.id, image: r.image }));
   },
 
+  // ---------------- AS (기능 asEngineer) ----------------
+  // 나에게 맡겨진 처리 중인 AS (사무실이 AS 접수 때 담당 기사로 고른 것)
+  async myAs() {
+    const { db, user } = await authorizeEngineer();
+    if (!hasFeature(companyOf(db, user), 'asEngineer') || !hasFeature(companyOf(db, user), 'as')) return [];
+    const out = [];
+    db.contracts.forEach((c) => {
+      if (c.companyId !== user.companyId || c.deletedAt) return;
+      (c.asLogs || []).forEach((l, asIndex) => {
+        if (l.doneAt || l.engineerId !== user.engineerId) return;
+        out.push({
+          contractId: c.id,
+          asIndex,
+          date: l.date,
+          request: l.request,
+          photoCount: l.photoCount || 0,
+          visitDate: l.visitDate || '',
+          visitTime: l.visitTime || '',
+          category: c.category,
+          brand: c.brand,
+          customerName: c.customerName,
+          customerPhone: c.customerPhone,
+          customerPhone2: c.customerPhone2 || '',
+          address: formatAddress(c),
+          aptName: c.aptName || '',
+        });
+      });
+    });
+    return out.sort((a, b) => (a.visitDate ? 1 : 0) - (b.visitDate ? 1 : 0) || a.date.localeCompare(b.date));
+  },
+
+  // AS 방문일 등록 (담당 기사 본인만) — 사무실 AS관리 목록·변경이력에 표시
+  async setAsVisit(contractId, asIndex, { date, time } = {}) {
+    const { db, user } = await authorizeEngineer();
+    requireFeature(db, user, 'asEngineer');
+    const c = db.contracts.find((x) => x.id === Number(contractId) && x.companyId === user.companyId && !x.deletedAt);
+    const entry = c?.asLogs?.[Number(asIndex)];
+    if (!entry || entry.engineerId !== user.engineerId) throw new ApiError('나에게 맡겨진 AS 가 아닙니다.', 'FORBIDDEN');
+    if (entry.doneAt) throw new ApiError('이미 완료된 AS 입니다.');
+    if (!isDateKey(date)) throw new ApiError('방문 날짜를 골라 주세요.');
+    const t = /^\d{2}:\d{2}$/.test(String(time || '')) ? String(time) : '';
+    const before = [entry.visitDate, entry.visitTime].filter(Boolean).join(' ');
+    entry.visitDate = date;
+    entry.visitTime = t;
+    if (c.asInfo && Number(asIndex) === c.asLogs.length - 1) c.asInfo = { ...entry };
+    addHistory(c, user, 'AS 방문일 등록', [{ label: `AS ${Number(asIndex) + 1}회 방문`, from: before, to: [date, t].filter(Boolean).join(' ') }]);
+    saveDb(db);
+    return { visitDate: entry.visitDate, visitTime: entry.visitTime };
+  },
+
+  // AS 를 다른 기사에게 넘기기 (담당 기사 본인만) — 방문일은 새 기사가 다시 정함
+  async transferAs(contractId, asIndex, engineerId) {
+    const { db, user } = await authorizeEngineer();
+    requireFeature(db, user, 'asEngineer');
+    const c = db.contracts.find((x) => x.id === Number(contractId) && x.companyId === user.companyId && !x.deletedAt);
+    const entry = c?.asLogs?.[Number(asIndex)];
+    if (!entry || entry.engineerId !== user.engineerId) throw new ApiError('나에게 맡겨진 AS 가 아닙니다.', 'FORBIDDEN');
+    if (entry.doneAt) throw new ApiError('이미 완료된 AS 입니다.');
+    const to = db.engineers.find((e) => e.id === Number(engineerId) && e.companyId === user.companyId && e.active !== false);
+    if (!to || to.id === user.engineerId) throw new ApiError('넘길 기사님을 골라 주세요.');
+    const from = entry.engineerName || '';
+    Object.assign(entry, { engineerId: to.id, engineerName: to.name, visitDate: '', visitTime: '' });
+    if (c.asInfo && Number(asIndex) === c.asLogs.length - 1) c.asInfo = { ...entry };
+    addHistory(c, user, 'AS 담당 기사 변경', [{ label: `AS ${Number(asIndex) + 1}회 담당`, from, to: to.name }]);
+    saveDb(db);
+    return { engineerName: to.name };
+  },
+
+  // AS 현장 보고 (담당 기사 본인만, 기능 asReport) — 상태 + 메모, '시공완료'면 그 회차 AS 완료
+  async reportAs(contractId, asIndex, { mobileStatus, memo } = {}) {
+    const { db, user } = await authorizeEngineer();
+    requireFeature(db, user, 'asEngineer');
+    requireFeature(db, user, 'asReport');
+    const c = db.contracts.find((x) => x.id === Number(contractId) && x.companyId === user.companyId && !x.deletedAt);
+    const idx = Number(asIndex);
+    const entry = c?.asLogs?.[idx];
+    if (!entry || entry.engineerId !== user.engineerId) throw new ApiError('나에게 맡겨진 AS 가 아닙니다.', 'FORBIDDEN');
+    if (entry.doneAt) throw new ApiError('이미 완료된 AS 입니다.');
+    if (mobileStatus && !MOBILE_STATUS.includes(mobileStatus)) throw new ApiError('상태를 선택해 주세요.');
+    const before = entry.mobileStatus || '입력 전';
+    entry.mobileStatus = mobileStatus || '';
+    entry.mobileMemo = String(memo || '').trim().slice(0, 500);
+    entry.reportedAt = nowIso();
+    entry.reportedBy = user.name;
+    const fields = [{ label: `AS ${idx + 1}회 기사 보고`, from: before, to: entry.mobileStatus || '입력 전' }];
+    if (entry.mobileMemo) fields.push({ label: '메모', from: '', to: entry.mobileMemo });
+    const done = entry.mobileStatus === '시공완료';
+    if (done) {
+      entry.doneAt = today();
+      entry.doneBy = user.name;
+      fields.push({ label: `AS ${idx + 1}회`, from: '처리 중', to: '완료' });
+    }
+    if (c.asInfo && idx === c.asLogs.length - 1) c.asInfo = done ? null : { ...entry };
+    addHistory(c, user, done ? 'AS 완료 (기사 보고)' : 'AS 기사 보고', fields);
+    saveDb(db);
+    return { mobileStatus: entry.mobileStatus, doneAt: entry.doneAt || '' };
+  },
+
+  // AS 넘길 때 고를 다른 기사님 (이름만)
+  async colleagues() {
+    const { db, user } = await authorizeEngineer();
+    return db.engineers
+      .filter((e) => e.companyId === user.companyId && e.active !== false && e.id !== user.engineerId)
+      .map((e) => ({ id: e.id, name: e.name }))
+      .sort((a, b) => a.name.localeCompare(b.name, 'ko'));
+  },
+
+  // 시공 사진 (기능 stepPhotos): 보기는 본인에게 배정된 계약의 모든 회차, 올리기·지우기는 본인 회차만 (지우기는 본인이 올린 사진만)
+  async stepPhotos(contractId, stepIndex) {
+    const { db, user } = await authorizeEngineer();
+    requireFeature(db, user, 'stepPhotos');
+    const c = db.contracts.find((x) => x.id === Number(contractId) && x.companyId === user.companyId && !x.deletedAt);
+    if (!c || !c.schedules.some((s) => isMine(user, s))) throw new ApiError('본인에게 배정된 계약이 아닙니다.', 'FORBIDDEN');
+    return listStepPhotos(db, c, stepIndex);
+  },
+
+  async addStepPhotos(contractId, stepIndex, photos = []) {
+    const { db, user } = await authorizeEngineer();
+    requireFeature(db, user, 'stepPhotos');
+    const c = db.contracts.find((x) => x.id === Number(contractId) && x.companyId === user.companyId && !x.deletedAt);
+    const s = c?.schedules?.[Number(stepIndex)];
+    if (!s || !isMine(user, s)) throw new ApiError('본인에게 배정된 일정이 아닙니다.', 'FORBIDDEN');
+    const before = s.photoCount || 0;
+    const count = addStepPhotos(db, user, c, stepIndex, photos);
+    if (count !== before) addHistory(c, user, '시공 사진 (기사)', [{ label: `${Number(stepIndex) + 1}차 사진`, from: `${before}장`, to: `${count}장` }]);
+    saveDb(db);
+    return { photoCount: count };
+  },
+
+  async removeStepPhoto(contractId, photoId) {
+    const { db, user } = await authorizeEngineer();
+    requireFeature(db, user, 'stepPhotos');
+    const c = db.contracts.find((x) => x.id === Number(contractId) && x.companyId === user.companyId && !x.deletedAt);
+    if (!c || !c.schedules.some((s) => isMine(user, s))) throw new ApiError('본인에게 배정된 계약이 아닙니다.', 'FORBIDDEN');
+    const i = removeStepPhoto(db, user, c, photoId, { onlyMine: true });
+    saveDb(db);
+    return { photoCount: c.schedules[i]?.photoCount || 0 };
+  },
+
+  // AS 사진 (나에게 맡겨진 AS 회차만)
+  async asPhotos(contractId, asIndex) {
+    const { db, user } = await authorizeEngineer();
+    const c = db.contracts.find((x) => x.id === Number(contractId) && x.companyId === user.companyId && !x.deletedAt);
+    const entry = c?.asLogs?.[Number(asIndex)];
+    if (!entry || entry.engineerId !== user.engineerId) throw new ApiError('나에게 맡겨진 AS 가 아닙니다.', 'FORBIDDEN');
+    return (db.paymentReceipts || [])
+      .filter((r) => r.contractId === c.id && r.kind === 'asPhoto' && Number(r.asIndex) === Number(asIndex))
+      .sort((x, y) => x.id - y.id)
+      .map((r) => ({ id: r.id, image: r.image }));
+  },
+
   // 기사 현장 보고 → 계약서 '모바일웹 ①②③' 에 표시
   // 시공완료 보고: done(한 범위)·undone(못 한 범위)·material(사용 자재·색상) → 회차의 '시공 기록'(누가·언제·무엇을·무엇으로)
   //   note: 체크로 애매한 부분을 직접 적은 글 (예: 샤워벽은 절반만, 나머지 다음 방문)
@@ -508,12 +696,12 @@ export const engineerApp = {
       : null;
     const has = list || Array.isArray(done) || Array.isArray(undone) || material || note || helpers;
     const record =
-      s.mobileStatus === '시공완료' && has
+      s.mobileStatus === '시공완료' && has && hasFeature(companyOf(db, user), 'workRecord')
         ? {
             ...(list ? { items: list } : {}),
             done: list ? list.filter((x) => x.done).map((x) => x.text) : texts(done),
             undone: list ? list.filter((x) => !x.done).map((x) => x.text) : texts(undone),
-            material: str(material, 200),
+            material: str(material, 500),
             color: str(color, 30),
             helpers: str(helpers, 200),
             note: str(note, 1000),
@@ -540,6 +728,7 @@ export const engineerApp = {
   // 내 박람회 일정 (본인이 포함된 것만)
   async myFairs({ from, to } = {}) {
     const { db, user } = await authorizeEngineer();
+    if (!hasFeature(companyOf(db, user), 'fair')) return [];
     return (companyOf(db, user)?.fairs || [])
       .filter((f) => (f.engineerIds || []).includes(user.engineerId) && fairInRange(f, from, to))
       .sort(sortFairs)

@@ -8,7 +8,10 @@ import {
   ROLES,
   permissionsOf,
 } from '../auth/permissions.js';
-import { DEPARTMENTS, POSITIONS } from '../constants.js';
+import { CATEGORIES, DEPARTMENTS, LIGHTING_CATEGORIES, FEATURES, POSITIONS, companyCategories, hasFeature } from '../constants.js';
+
+// 업체 기능 스위치 → { key: true/false } (화면 체크박스용)
+const featureMap = (company) => Object.fromEntries(FEATURES.map((f) => [f.key, hasFeature(company, f.key)]));
 import { addDays, today } from '../utils/date.js';
 import { formatPhone } from '../utils/format.js';
 import { backdrop } from '../utils/backdrop.js';
@@ -76,6 +79,8 @@ function SuperAdminView() {
       mobile: '',
       quickPhone: '',
       brands: '',
+      categories: [...LIGHTING_CATEGORIES], // 새 업체는 조명용 구분으로 시작 (아르떼)
+      features: featureMap(null),
       periodStart: today(),
       periodEnd: addDays(today(), 365),
       adminLoginId: '',
@@ -93,12 +98,15 @@ function SuperAdminView() {
       ceo: f.ceo,
       bizNo: f.bizNo,
       address: f.address,
+      // 계약서 하단 업체 정보 (신화탄성 양식 계약서)
       bizType: f.bizType || '',
       bizItem: f.bizItem || '',
       csPhone: f.csPhone || '',
       mobile: f.mobile || '',
       quickPhone: f.quickPhone || '',
       brands: f.brands.split(',').map((b) => b.trim()).filter(Boolean),
+      categories: f.categories, // 시공 구분: 이 순서대로 계약 등록·검색·통계에 나옴
+      features: f.features, // 기능 스위치: 이 업체에서 쓰는 기능만 켬
       periodStart: f.periodStart,
       periodEnd: f.periodEnd,
     };
@@ -197,6 +205,10 @@ function SuperAdminView() {
                   <td className="bold-text">
                     {c.name}
                     <div className="sub-text">브랜드: {c.brands.join(', ')}</div>
+                    <div className="sub-text">시공 구분: {companyCategories(c).join(' · ')}</div>
+                    {FEATURES.some((f) => !hasFeature(c, f.key)) && (
+                      <div className="sub-text">꺼진 기능: {FEATURES.filter((f) => !hasFeature(c, f.key)).map((f) => f.label).join(' · ')}</div>
+                    )}
                     {c.code ? (
                       <div className="company-url">
                         <a href={`/${c.code}`} target="_blank" rel="noreferrer">{window.location.host}/{c.code}</a>
@@ -254,7 +266,7 @@ function SuperAdminView() {
                       <button
                         type="button"
                         className="btn-dark-action"
-                        onClick={() => setCompanyForm({ ...c, code: c.code || '', brands: c.brands.join(', ') })}
+                        onClick={() => setCompanyForm({ ...c, code: c.code || '', brands: c.brands.join(', '), categories: [...companyCategories(c)], features: featureMap(c) })}
                       >
                         수정/연장
                       </button>
@@ -294,18 +306,40 @@ function SuperAdminView() {
           <Row label="주소">
             <input className="input-text full" value={companyForm.address} onChange={(e) => setCompanyForm({ ...companyForm, address: e.target.value })} />
           </Row>
-          <Row label="업태 / 종목">
-            <input className="input-text" placeholder="예: 건설업" value={companyForm.bizType || ''} onChange={(e) => setCompanyForm({ ...companyForm, bizType: e.target.value })} />
-            <input className="input-text" placeholder="예: 페인트, 도장" value={companyForm.bizItem || ''} onChange={(e) => setCompanyForm({ ...companyForm, bizItem: e.target.value })} />
-          </Row>
-          <Row label="고객센터 / 휴대번호 / 빠른문의">
-            <input className="input-text" placeholder="고객센터" value={companyForm.csPhone || ''} onChange={(e) => setCompanyForm({ ...companyForm, csPhone: e.target.value })} />
-            <input className="input-text" placeholder="휴대번호" value={companyForm.mobile || ''} onChange={(e) => setCompanyForm({ ...companyForm, mobile: e.target.value })} />
-            <input className="input-text" placeholder="빠른문의" value={companyForm.quickPhone || ''} onChange={(e) => setCompanyForm({ ...companyForm, quickPhone: e.target.value })} />
-            <div className="sub-text">계약서 하단 업체 정보에 표시됩니다.</div>
-          </Row>
+          {companyForm.features?.paintContract && (
+            <>
+              <Row label="업태 / 종목">
+                <input className="input-text" placeholder="예: 건설업" value={companyForm.bizType || ''} onChange={(e) => setCompanyForm({ ...companyForm, bizType: e.target.value })} />{' '}
+                <input className="input-text" placeholder="예: 페인트, 도장" value={companyForm.bizItem || ''} onChange={(e) => setCompanyForm({ ...companyForm, bizItem: e.target.value })} />
+              </Row>
+              <Row label="고객센터 / 휴대번호 / 빠른문의">
+                <input className="input-text" placeholder="고객센터" value={companyForm.csPhone || ''} onChange={(e) => setCompanyForm({ ...companyForm, csPhone: e.target.value })} />{' '}
+                <input className="input-text" placeholder="휴대번호" value={companyForm.mobile || ''} onChange={(e) => setCompanyForm({ ...companyForm, mobile: e.target.value })} />{' '}
+                <input className="input-text" placeholder="빠른문의" value={companyForm.quickPhone || ''} onChange={(e) => setCompanyForm({ ...companyForm, quickPhone: e.target.value })} />
+                <div className="sub-text">신화탄성 양식 탄성·페인트 계약서 하단 업체 정보에 표시됩니다.</div>
+              </Row>
+            </>
+          )}
           <Row label="브랜드">
             <input className="input-text full" placeholder="쉼표로 구분 (예: 더좋은집, 더스타트)" value={companyForm.brands} onChange={(e) => setCompanyForm({ ...companyForm, brands: e.target.value })} />
+          </Row>
+          <Row label="시공 구분">
+            <CategoryEditor value={companyForm.categories || []} onChange={(categories) => setCompanyForm({ ...companyForm, categories })} />
+          </Row>
+          <Row label="기능 켜기/끄기">
+            <div className="feature-switches">
+              {FEATURES.map((f) => (
+                <label key={f.key} className="perm-check">
+                  <input
+                    type="checkbox"
+                    checked={!!companyForm.features?.[f.key]}
+                    onChange={(e) => setCompanyForm({ ...companyForm, features: { ...companyForm.features, [f.key]: e.target.checked } })}
+                  />
+                  {f.label}
+                </label>
+              ))}
+            </div>
+            <div className="sub-text">체크를 빼면 이 업체 화면에서 그 기능이 사라지고 서버에서도 막힙니다. (자료는 지워지지 않아 다시 켜면 그대로)</div>
           </Row>
           <Row label="이용기간 *">
             <input type="date" className="input-text" value={companyForm.periodStart} onChange={(e) => setCompanyForm({ ...companyForm, periodStart: e.target.value })} required />
@@ -605,5 +639,57 @@ function Row({ label, children }) {
       <td className="label-col">{label}</td>
       <td className="input-col inline-fields">{children}</td>
     </tr>
+  );
+}
+
+// 운영자: 업체의 시공 구분 목록과 순서 (계약 등록 [구분] 체크 칸·검색·통계에 이 순서대로)
+//   빼도 예전 계약의 구분은 그대로 남고 보입니다. '기타'는 기사 담당시공·상품 구분에는 나오지 않습니다.
+function CategoryEditor({ value, onChange }) {
+  const [draft, setDraft] = useState('');
+  const move = (i, d) => {
+    const next = [...value];
+    const j = i + d;
+    if (j < 0 || j >= next.length) return;
+    [next[i], next[j]] = [next[j], next[i]];
+    onChange(next);
+  };
+  const add = () => {
+    const name = draft.trim().replace(/[[\]]/g, '').slice(0, 20);
+    if (!name || value.includes(name)) return;
+    onChange([...value, name]);
+    setDraft('');
+  };
+  return (
+    <div className="category-editor">
+      <ol className="category-list">
+        {value.map((c, i) => (
+          <li key={c}>
+            <span className="category-name">{c}</span>
+            <button type="button" className="btn-link" onClick={() => move(i, -1)} disabled={i === 0} aria-label={`${c} 위로`}>▲</button>
+            <button type="button" className="btn-link" onClick={() => move(i, 1)} disabled={i === value.length - 1} aria-label={`${c} 아래로`}>▼</button>
+            <button type="button" className="btn-link text-red" onClick={() => onChange(value.filter((x) => x !== c))}>빼기</button>
+          </li>
+        ))}
+      </ol>
+      <div className="inline-fields">
+        <input
+          className="input-text"
+          value={draft}
+          maxLength={20}
+          placeholder="새 구분 (예: 방충망)"
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              add();
+            }
+          }}
+        />
+        <button type="button" className="btn-dark-lg sm" onClick={add}>추가</button>
+        <button type="button" className="btn-link" onClick={() => onChange([...CATEGORIES])}>기본값으로</button>
+        <button type="button" className="btn-link" onClick={() => onChange([...LIGHTING_CATEGORIES])}>조명용으로</button>
+      </div>
+      <div className="sub-text">▲▼ 로 순서를 바꾸면 계약 등록의 [구분] 칸이 이 순서로 나옵니다. 뺀 구분의 예전 계약은 그대로 남습니다.</div>
+    </div>
   );
 }

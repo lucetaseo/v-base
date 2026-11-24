@@ -54,14 +54,14 @@ const RECEPTION = { 박람: '박람회', 음성: '음성계약', 사전: '사전
 
 // "① : 2026-10-15(9:00)" → { date, time } / "(오전)"·"(오후)" → ampm (시간 미정 오전·오후)
 function parseWhen(text) {
-  const t = String(text || '').replace(/^[①②③]\s*:\s*/, '');
+  const t = String(text || '').replace(/^[①②③④]\s*:\s*/, '');
   const date = (t.match(/\d{4}-\d{2}-\d{2}/) || [''])[0];
   const tm = (t.match(/\((\d{1,2}):(\d{2})\)/) || []).slice(1);
   if (tm.length) return { date, time: `${tm[0].padStart(2, '0')}:${tm[1]}` };
   const ampm = /\(\s*오전/.test(t) ? 'AM' : /\(\s*오후/.test(t) ? 'PM' : '';
   return { date, time: '', ...(ampm ? { ampm } : {}) };
 }
-const who = (text) => String(text || '').replace(/^[①②③]\s*:\s*/, '').trim();
+const who = (text) => String(text || '').replace(/^[①②③④]\s*:\s*/, '').trim();
 
 // 예전 1줄 → 우리 계약 입력 형태 (+ legacyNo: 예전 번호, 중복 가져오기 방지)
 export function mapLegacyRow({ cells, hidden = [] }) {

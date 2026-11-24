@@ -519,25 +519,6 @@ body {
   color: #444444;
 }
 
-/* 상세일정 시공자 칸: 눌러서 바로 기사 변경 */
-.assign-select {
-  max-width: 140px;
-  padding: 5px 6px;
-  border: 1px solid #1a6fe0;
-  border-radius: 4px;
-  background: #f0f6ff;
-  color: #1a3d7c;
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.assign-select.unassigned {
-  border-color: #e11d48;
-  background: #fff1f2;
-  color: #be123c;
-}
-
 .btn-talk-yellow {
   background-color: #facc15;
   border: none;
@@ -989,14 +970,6 @@ body {
   border-color: #1a6fe0;
   color: #fff;
   font-weight: bold;
-  font-size: 14px;
-  padding: 8px 18px;
-  border-radius: 6px;
-}
-
-.btn-quick.blue:hover {
-  background: #1557b8;
-  border-color: #1557b8;
 }
 
 .welcome {
@@ -1097,30 +1070,6 @@ body {
   margin: 0;
   opacity: 0.85;
   font-size: 14px;
-}
-
-/* 다른 업체 계정으로 로그인된 채 업체 주소로 들어온 경우 안내 */
-.login-other {
-  margin: 0;
-  background: rgba(255, 255, 255, 0.95);
-  color: #334155;
-  padding: 8px 10px;
-  border-radius: 4px;
-  font-size: 13px;
-  line-height: 1.5;
-}
-
-.login-form .login-stay {
-  height: auto;
-  padding: 0;
-  border: 0;
-  color: #1a6fe0;
-  font-size: 13px;
-  text-decoration: underline;
-}
-
-.login-form .login-stay:hover {
-  background: transparent;
 }
 
 /* 로그인 화면 구분: 일반화면 / 기사모바일 */
@@ -5274,6 +5223,8 @@ a.btn-quick.blue:hover {
   font-family: inherit;
   font-size: 15px;
   resize: vertical;
+  min-height: 290px; /* 13줄 정도 */
+  line-height: 1.45;
 }
 .work-record.summary {
   border-left-width: 3px;
@@ -5634,6 +5585,330 @@ button.paper-add { font: inherit; }
   .phone-input .input-text.phone-part.head { width: 56px; }
 }
 
+/* 앱 설치 · 바로가기 (내 정보, 기사모바일 휴무 설정 아래) */
+.install-card { margin: 18px 0 8px; }
+.install-card .btn-install { background: #1a6fe0; color: #fff; border: none; border-radius: 8px; padding: 12px 20px; font-size: 16px; font-weight: bold; cursor: pointer; }
+.install-card .btn-install:hover { background: #155bc0; }
+.install-card .install-ok { color: #157347; font-weight: bold; }
+.install-card .install-howto { background: #f4f8ff; border: 1px solid #d6e4fb; border-radius: 8px; padding: 10px 12px; line-height: 1.6; }
+.install-card .install-web { margin-top: 12px; font-size: 14px; }
+.install-card .install-web summary { cursor: pointer; color: #555; }
+.install-card .install-web ol { margin: 8px 0 4px; padding-left: 20px; line-height: 1.7; }
+.install-card .install-web code { background: #f2f2f2; padding: 1px 6px; border-radius: 4px; word-break: break-all; }
+.engineer-app .install-card { padding: 0 16px 24px; }
+
+/* 운영자: 업체 시공 구분 목록·순서 */
+.category-editor { display: flex; flex-direction: column; gap: 8px; }
+.category-editor .category-list { margin: 0; padding-left: 22px; display: flex; flex-direction: column; gap: 4px; }
+.category-editor .category-list li { display: flex; align-items: center; gap: 8px; }
+.category-editor .category-name { min-width: 110px; font-weight: bold; }
+.category-editor .btn-link:disabled { opacity: 0.3; cursor: default; }
+
+/* 업체 기능 스위치 (운영자 업체 수정 창) */
+.feature-switches {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 6px 14px;
+  width: 100%;
+}
+
+/* 계약 상세: 패키지·추가시공품목 칸 아래 금액 */
+.line-items-total {
+  margin-top: 4px;
+  color: #1a5fd0;
+  font-weight: 700;
+}
+
+/* 다른 화면 앱 설치 (내 정보) · 설치 전용 화면 */
+.install-card .install-others { margin-top: 14px; padding-top: 12px; border-top: 1px dashed #d6e4fb; }
+.install-card .install-other-row { display: flex; align-items: center; gap: 12px; margin-top: 8px; flex-wrap: wrap; }
+.install-card .install-other-row > b { min-width: 110px; }
+.install-card .btn-install.sm, .install-screen .btn-install { display: inline-block; text-decoration: none; }
+.install-card .btn-install.sm { padding: 8px 14px; font-size: 14px; }
+.install-screen { background: #fff; border-radius: 16px; padding: 32px 28px; max-width: 460px; width: calc(100% - 32px); display: flex; flex-direction: column; gap: 16px; box-shadow: 0 20px 60px rgba(0,0,0,0.25); }
+.install-screen h1 { margin: 0; font-size: 24px; color: #172033; }
+.install-screen p { margin: 0; line-height: 1.6; color: #333; }
+.install-screen .btn-install { background: #1a6fe0; color: #fff; border: none; border-radius: 10px; padding: 16px 20px; font-size: 18px; font-weight: bold; cursor: pointer; }
+.install-screen .install-ok { color: #157347; font-weight: bold; }
+.install-screen .install-howto { background: #f4f8ff; border: 1px solid #d6e4fb; border-radius: 8px; padding: 10px 12px; line-height: 1.6; }
+.install-screen-go { color: #1a5fd0; font-size: 15px; }
+
+.install-screen .install-note { font-size: 14px; color: #555; background: #fff8e6; border: 1px solid #f5d98b; border-radius: 8px; padding: 10px 12px; }
+
+/* [지도] 버튼 (계약 상세 · 기사모바일) */
+.btn-map { display: inline-block; font-size: 13px; font-weight: 600; color: #1a5fd0; background: #eef4ff; border: 1px solid #c9dafb; border-radius: 6px; padding: 2px 8px; text-decoration: none; white-space: nowrap; vertical-align: middle; }
+.btn-map:hover { background: #dfeafd; }
+
+/* 기사모바일 AS: 빨간 알림 · AS관리 탭 · AS 카드 */
+.as-alert { display: flex; align-items: center; gap: 12px; margin: 16px 0 14px; padding: 12px 14px; background: #fff; border: 1px solid #f1d4d4; border-radius: 12px; box-shadow: 0 2px 8px rgba(214, 40, 40, 0.08); cursor: pointer; }
+.as-alert:hover { border-color: #e9b4b4; }
+.as-alert-badge { flex: none; width: 28px; height: 28px; border-radius: 50%; background: #e5484d; color: #fff; font-size: 14px; font-weight: 700; display: flex; align-items: center; justify-content: center; }
+.as-alert-text { flex: 1; display: flex; flex-direction: column; gap: 2px; line-height: 1.35; }
+.as-alert-text b { color: #c62828; font-size: 15px; }
+.as-alert-text small { color: #6b7280; font-size: 13px; }
+.as-alert-go { flex: none; padding: 6px 12px; border-radius: 999px; background: #fdecec; color: #c62828; font-size: 13px; font-weight: 700; }
+.radio-tag.as-tag { border-color: #17a2b8; color: #0e7c8c; }
+.radio-tag.as-tag.selected { background: #e6f7fa; }
+.as-count { display: inline-block; margin-left: 6px; min-width: 20px; padding: 0 6px; border-radius: 10px; background: #d62828; color: #fff; font-size: 12px; text-align: center; }
+.my-as-list { margin-top: 16px; display: flex; flex-direction: column; gap: 12px; }
+.engineer-card.as-card { border-radius: 12px; }
+.engineer-card.as-card.pending { border-color: #f1c4c4; box-shadow: 0 2px 8px rgba(214, 40, 40, 0.06); }
+.as-request-text { margin: 6px 0; white-space: pre-wrap; }
+.as-visit-form { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+.as-visit-form .input-text { flex: 1 1 120px; }
+.status-chip.st-red { background: #fde2e2; color: #b00020; }
+
+.as-step { padding: 1px 8px; border: 1px solid #17a2b8; border-radius: 6px; color: #0e7c8c; font-size: 12px; font-weight: 700; }
+.engineer-card.as-schedule-card { border-color: #f1c4c4; }
+.as-visit-form .as-mode { flex: 0 1 130px; font-weight: 700; }
+
+/* 설정 > 회사 자료 백업 */
+.company-files .files-upload { display: flex; gap: 8px; margin: 12px 0; flex-wrap: wrap; }
+.company-files .files-upload .input-text { flex: 1; min-width: 200px; }
+.company-files .files-pick { cursor: pointer; display: inline-flex; align-items: center; }
+.company-files .files-pick.disabled { opacity: 0.5; pointer-events: none; }
+.company-files .files-busy { background: #eef4ff; color: #1d4ed8; border-radius: 8px; padding: 8px 12px; margin-bottom: 12px; font-size: 14px; }
+.company-files .files-search { display: flex; gap: 8px; align-items: center; margin: 4px 0 12px; }
+.company-files .files-search .input-text { flex: 1; }
+.company-files .files-list { list-style: none; margin: 0; padding: 0; border-top: 1px solid #e5e7eb; }
+.company-files .files-list li { display: flex; align-items: center; gap: 10px; padding: 10px 4px; border-bottom: 1px solid #e5e7eb; }
+.company-files .files-icon { font-size: 24px; }
+.company-files .files-info { flex: 1; min-width: 0; }
+.company-files .files-name { word-break: break-all; }
+.company-files .files-down { text-decoration: none; white-space: nowrap; }
+.company-files .files-del { white-space: nowrap; }
+.company-files .files-empty { color: #6b7280; text-align: center; padding: 28px 0; }
+/* 상담내역: 전화번호 검색 → 통화내역 입력 → (줄) → 작성된 상담내역 */
+.call-search {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin: 8px 0 16px;
+}
+
+.call-search .input-text {
+  flex: 1;
+  height: 42px;
+  font-size: 15px;
+}
+
+.call-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid #dce1e8;
+  border-radius: 6px;
+  background: #f8fafc;
+}
+
+.call-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #334155;
+}
+
+.call-form-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 20px;
+}
+
+.call-form-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.call-divider {
+  margin: 22px 0 12px;
+  border: 0;
+  border-top: 2px dashed #94a3b8;
+}
+
+.call-list-head {
+  margin-bottom: 8px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #475569;
+}
+
+.call-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.call-list li {
+  padding: 10px 4px;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.call-list li.editing {
+  background: #eff6ff;
+}
+
+.call-item-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  font-size: 14px;
+}
+
+.call-item-btns {
+  margin-left: auto;
+  display: flex;
+  gap: 8px;
+}
+
+.call-item-memo {
+  margin-top: 4px;
+  white-space: pre-wrap;
+  font-size: 14px;
+  color: #1f2937;
+}
+.engineer-view-tags { margin-bottom: 14px; } /* 기사모바일: 위 버튼 줄과 날짜(2026. 11) 사이 */
+
+/* 기사모바일 시공 기록: 공통 자재를 위쪽에 길게 (항목별 입력은 필요할 때만 펼침) */
+.scope-common { margin: 8px 0 6px; padding: 10px; background: #f4f8ff; border: 1px solid #d6e4f7; border-radius: 10px; gap: 6px; }
+.scope-common-label { font-weight: 700; font-size: 14px; color: #1e3a8a; }
+.scope-common .scope-common-mat { width: 100%; min-height: 56px; font-size: 15px; resize: vertical; box-sizing: border-box; }
+.scope-common-row { display: flex; gap: 6px; }
+.scope-common-row select { flex: 1; min-width: 0; font-size: 14px; }
+.scope-common-row .num { flex: 0 0 110px; font-size: 14px; }
+.scope-peritem-toggle { margin: 8px 0 4px; padding: 8px 10px; width: 100%; background: #fff; border: 1px dashed #9db5d6; border-radius: 8px; color: #35598a; font-size: 14px; cursor: pointer; }
+.doc-sign-names { text-align: right; line-height: 1.8; } /* 계약서: 상담자 위, 계약자 아래 */
+
+/* 신화탄성 탄성·페인트 계약서 (기능 paintContract, v-base 에서 가져옴) */
+.paint-line {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 260px;
+}
+
+.paint-places {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 10px;
+}
+
+.paint-doc .doc-title {
+  letter-spacing: 4px;
+}
+
+.paint-doc .doc-table th {
+  white-space: nowrap;
+}
+
+.paint-products thead th,
+.paint-amounts thead th {
+  background: #e5e7eb;
+  text-align: center;
+}
+
+.paint-product strong {
+  font-size: 15px;
+}
+
+.paint-places-cell span {
+  display: inline-block;
+  min-width: 72px;
+  color: #94a3b8;
+}
+
+.paint-places-cell span.on {
+  color: #0f172a;
+  font-weight: 600;
+}
+
+.paint-check {
+  display: inline-block;
+  margin-right: 16px;
+}
+
+.paint-amounts caption {
+  font-weight: 700;
+  padding: 6px 0;
+  color: #334155;
+}
+
+.paint-amounts tr.paint-total th,
+.paint-amounts tr.paint-total td {
+  font-weight: 700;
+  background: #f1f5f9;
+}
+
+.paint-bottom {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.paint-terms {
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  padding: 10px 12px;
+  font-size: 13px;
+}
+
+.paint-terms h4 {
+  margin: 0 0 6px;
+}
+
+.paint-terms p {
+  margin: 0 0 6px;
+  line-height: 1.5;
+}
+
+.paint-company {
+  margin: 0;
+  align-self: start;
+}
+
+@media screen and (max-width: 768px) {
+  .paint-bottom {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* 계약서 작성 상품 줄: 품질보증·구역 칸 */
+.paint-line .li-warranty {
+  width: 110px;
+}
+
+.paint-line .li-zone {
+  flex: 1;
+  min-width: 120px;
+}
+
+.paint-line-detail { max-height: 6em; overflow: auto; }
+@media screen and (max-width: 768px) {
+  .line-items .paint-line {
+    min-width: 0;
+  }
+
+  .line-items .paint-places {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
+  }
+
+  .line-items .paint-line .inline-fields {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+    gap: 6px;
+  }
+
+  .line-items .paint-line .li-zone {
+    min-width: 0;
+  }
+}
+
 /* 통계정보 > 매입관리: 입력 줄 */
 .purchase-form {
   display: grid;
@@ -5745,192 +6020,47 @@ button.paper-add { font: inherit; }
   margin: 0;
 }
 
-/* 탄성·페인트 계약서 (신화탄성 종이 계약서 양식) */
-.paint-line {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  min-width: 260px;
-}
-
-.paint-places {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 2px 10px;
-}
-
-.paint-doc .doc-title {
-  letter-spacing: 4px;
-}
-
-.paint-doc .doc-table th {
-  white-space: nowrap;
-}
-
-.paint-products thead th,
-.paint-amounts thead th {
-  background: #e5e7eb;
-  text-align: center;
-}
-
-.paint-product strong {
-  font-size: 15px;
-}
-
-.paint-places-cell span {
-  display: inline-block;
-  min-width: 72px;
-  color: #94a3b8;
-}
-
-.paint-places-cell span.on {
-  color: #0f172a;
+/* 상세일정 시공자 칸: 눌러서 바로 기사 변경 */
+.assign-select {
+  max-width: 140px;
+  padding: 5px 6px;
+  border: 1px solid #1a6fe0;
+  border-radius: 4px;
+  background: #f0f6ff;
+  color: #1a3d7c;
+  font-size: 12px;
   font-weight: 600;
+  cursor: pointer;
 }
 
-.paint-check {
-  display: inline-block;
-  margin-right: 16px;
+.assign-select.unassigned {
+  border-color: #e11d48;
+  background: #fff1f2;
+  color: #be123c;
 }
 
-.paint-amounts caption {
-  font-weight: 700;
-  padding: 6px 0;
+/* 다른 업체 계정으로 로그인된 채 업체 주소로 들어온 경우 안내 */
+.login-other {
+  margin: 0;
+  background: rgba(255, 255, 255, 0.95);
   color: #334155;
-}
-
-.paint-amounts tr.paint-total th,
-.paint-amounts tr.paint-total td {
-  font-weight: 700;
-  background: #f1f5f9;
-}
-
-.paint-bottom {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 12px;
-  margin-top: 12px;
-}
-
-.paint-terms {
-  border: 1px solid #cbd5e1;
-  border-radius: 6px;
-  padding: 10px 12px;
+  padding: 8px 10px;
+  border-radius: 4px;
   font-size: 13px;
-}
-
-.paint-terms h4 {
-  margin: 0 0 6px;
-}
-
-.paint-terms p {
-  margin: 0 0 6px;
   line-height: 1.5;
 }
 
-.paint-company {
-  margin: 0;
-  align-self: start;
+.login-form .login-stay {
+  height: auto;
+  padding: 0;
+  border: 0;
+  color: #1a6fe0;
+  font-size: 13px;
+  text-decoration: underline;
 }
 
-@media screen and (max-width: 768px) {
-  .paint-bottom {
-    grid-template-columns: 1fr;
-  }
-}
-
-/* 계약서 작성 상품 줄: 품질보증·구역 칸 */
-.paint-line .li-warranty {
-  width: 110px;
-}
-
-.paint-line .li-zone {
-  flex: 1;
-  min-width: 120px;
-}
-
-/* 모바일: 상품 줄을 표 대신 카드로 (상품명·시공장소는 한 줄 전체, 수량·단가·금액은 나란히) */
-@media screen and (max-width: 768px) {
-  .line-items {
-    display: block;
-    overflow-x: visible;
-  }
-
-  .line-items thead {
-    display: none;
-  }
-
-  .line-items tbody {
-    display: block;
-  }
-
-  .line-items tr {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 8px;
-    padding: 10px;
-    margin-bottom: 8px;
-    border: 1px solid #dce1e8;
-    border-radius: 8px;
-    background: #fff;
-  }
-
-  .line-items td {
-    padding: 0;
-    border: 0;
-    min-width: 0;
-  }
-
-  .line-items td[data-label]::before {
-    content: attr(data-label);
-    display: block;
-    margin-bottom: 3px;
-    font-size: 11px;
-    font-weight: 600;
-    color: #64748b;
-  }
-
-  .line-items td.li-name,
-  .line-items td.li-detail {
-    grid-column: 1 / -1;
-  }
-
-  .line-items td.li-amount {
-    text-align: left;
-    font-weight: 700;
-    align-self: end;
-    padding-bottom: 6px;
-  }
-
-  .line-items td.li-del {
-    grid-column: 1 / -1;
-    justify-self: end;
-  }
-
-  .line-items td input.input-text {
-    width: 100% !important;
-    box-sizing: border-box;
-  }
-
-  .line-items .paint-line {
-    min-width: 0;
-  }
-
-  .line-items .paint-places {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 6px;
-  }
-
-  .line-items .paint-line .inline-fields {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
-    gap: 6px;
-  }
-
-  .line-items .paint-line .li-zone {
-    min-width: 0;
-  }
+.login-form .login-stay:hover {
+  background: transparent;
 }
 
 /* 데이터 가져오기: [파일 선택] [양식 받기] */
@@ -5959,38 +6089,62 @@ a.import-no:hover {
   background: #1557b8;
 }
 
-.import-file-row a.btn-outline-action {
-  text-decoration: none;
+/* 시공 사진 (회차별): 계약 상세·기사모바일 */
+.step-photos {
+  margin: 8px 0;
+  padding: 10px 12px;
+  border: 1px solid #dce1e8;
+  border-radius: 6px;
+  background: #fafbfd;
 }
 
-/* 계약 등록: [+ 시공 추가]로 늘어난 다른 구분 시공 */
-.extra-work-title {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.extra-work-total {
-  margin-top: 6px;
-  text-align: right;
-  font-size: 13px;
-}
-
-.extra-work-add {
+.step-photos-head {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px 12px;
-  margin: 16px 0 4px;
+  gap: 6px 12px;
 }
 
-.btn-add-work {
-  padding: 8px 18px;
-  border: 1px solid #1a6fe0;
+.step-photo-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.step-photo {
+  position: relative;
+}
+
+.step-photo-thumb {
+  display: block;
+  width: 100%;
+  aspect-ratio: 1;
+  padding: 0;
+  border: 1px solid #e5e7eb;
   border-radius: 4px;
-  background: #1a6fe0;
+  overflow: hidden;
+  background: #fff;
+  cursor: pointer;
+}
+
+.step-photo-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.step-photo-del {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(190, 18, 60, 0.9);
   color: #fff;
-  font-size: 14px;
-  font-weight: 700;
+  font-size: 16px;
+  line-height: 24px;
   cursor: pointer;
 }

@@ -26,7 +26,11 @@ export const clearSession = () => adapter.clearSession();
 export const publicBaseUrl = () => adapter.publicBaseUrl();
 export const clientInfo = () => adapter.clientInfo();
 export const resetDemoData = () => adapter.resetDemoData();
+// 이 요청(탭)의 업체 주소 — 다른 업체 로그인으로 이 업체 화면을 쓰지 못하게 (없으면 '')
+export const requestCompany = () => (adapter.requestCompany ? adapter.requestCompany() : '');
 // 알림톡 발송(비즈고) — 서버에서만. 브라우저 데모 모드는 '연결 안 됨'
 export const alimtalkGateway = () => adapter.alimtalk || null;
+// 회사 자료 파일 저장소(Supabase Storage) — 서버에서만. 브라우저 데모 모드는 null
+export const fileStore = () => adapter.files || null;
 
 export { nextId } from './seed.js';

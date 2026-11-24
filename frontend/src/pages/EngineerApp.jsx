@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { usePageTitle } from '../utils/title.js';
 import { API_MODE, engineerApp } from '../api/index.js';
 import { useAuth } from '../auth/AuthContext.jsx';
-import { DEFAULT_SCHEDULE_SETTINGS, MOBILE_STATUS, OFF_LABEL } from '../constants.js';
+import { DEFAULT_SCHEDULE_SETTINGS, MOBILE_STATUS, OFF_LABEL, currentHasFeature } from '../constants.js';
 import { timeLabel } from '../utils/contract.js';
 import { WEEKDAYS, addDays, formatKoreanDate, toDateKey, today } from '../utils/date.js';
 import { won } from '../utils/format.js';
@@ -11,8 +11,11 @@ import { goBack, match, navigate, navigateForward } from '../router.js';
 import { loginEntry } from './LoginPage.jsx';
 import { useRefreshOnReturn } from '../utils/useRefreshOnReturn.js';
 import PhotoViewer from '../components/PhotoViewer.jsx';
+import StepPhotos from '../components/StepPhotos.jsx';
 import WorkRecord from '../components/WorkRecord.jsx';
 import LineItems from '../components/LineItems.jsx';
+import InstallCard from '../components/InstallCard.jsx';
+import MapLink from '../components/MapLink.jsx';
 
 // 기사모바일: 기사 계정으로 로그인하면 이 화면만 보입니다 (휴대폰 화면 기준).
 export default function EngineerApp({ route }) {
@@ -74,8 +77,124 @@ function monthCells(year, month) {
   return cells;
 }
 
+// 달력 위 빨간 알림: 방문일을 아직 안 정한 AS 가 있으면
+function AsAlert({ count, onOpen }) {
+  return (
+    <div className="as-alert" role="button" tabIndex={0} onClick={onOpen} onKeyDown={(e) => e.key === 'Enter' && onOpen()}>
+      <span className="as-alert-badge">{count}</span>
+      <span className="as-alert-text">
+        <b>AS 시공이 발생했습니다</b>
+        <small>고객에게 연락하고 방문일을 등록해 주세요</small>
+      </span>
+      <span className="as-alert-go">확인 ›</span>
+    </div>
+  );
+}
+
+// AS 시간 고르기 (30분 단위)
+const AS_TIMES = Array.from({ length: 27 }, (_, i) => `${String(7 + Math.floor(i / 2)).padStart(2, '0')}:${i % 2 ? '30' : '00'}`);
+
+// 기사모바일 AS관리: 나에게 맡겨진 AS 목록 · 방문일 등록 · 사진 보기
+function MyAsList({ items, onSaved }) {
+  const { handleError } = useAuth();
+  const [draft, setDraft] = useState({});
+  const [photos, setPhotos] = useState(null);
+  const [mates, setMates] = useState([]); // 넘길 수 있는 다른 기사님
+  useEffect(() => {
+    engineerApp.colleagues().then(setMates).catch(() => {});
+  }, []);
+  if (!items.length) return <p className="no-data">맡겨진 AS 가 없습니다.</p>;
+  const key = (a) => `${a.contractId}-${a.asIndex}`;
+  const val = (a) => ({ mode: 'visit', date: a.visitDate || '', time: a.visitTime || '', engineerId: '', ...(draft[key(a)] || {}) });
+  const put = (a, patch) => setDraft({ ...draft, [key(a)]: { ...val(a), ...patch } });
+  const save = async (a) => {
+    const v = val(a);
+    try {
+      if (v.mode === 'visit') {
+        if (!v.date) return alert('방문 날짜를 골라 주세요.');
+        await engineerApp.setAsVisit(a.contractId, a.asIndex, { date: v.date, time: v.time });
+        alert('AS 방문일을 등록했습니다. 내 일정과 사무실에 바로 표시됩니다.');
+      } else {
+        if (!v.engineerId) return alert('넘길 기사님을 골라 주세요.');
+        const name = mates.find((m) => String(m.id) === String(v.engineerId))?.name || '';
+        if (!window.confirm(`이 AS 를 ${name} 기사님에게 넘길까요? 넘기면 내 목록에서 빠집니다.`)) return;
+        await engineerApp.transferAs(a.contractId, a.asIndex, Number(v.engineerId));
+        alert(`${name} 기사님에게 넘겼습니다.`);
+      }
+      setDraft({ ...draft, [key(a)]: undefined });
+      onSaved();
+    } catch (e) {
+      handleError(e);
+    }
+  };
+  const showPhotos = async (a) => {
+    try {
+      const list = await engineerApp.asPhotos(a.contractId, a.asIndex);
+      if (list.length) setPhotos({ images: list.map((r) => r.image), title: `${a.customerName} AS 사진` });
+    } catch (e) {
+      handleError(e);
+    }
+  };
+  return (
+    <div className="my-as-list">
+      {items.map((a) => (
+        <div key={key(a)} className={`engineer-card as-card ${a.visitDate ? '' : 'pending'}`}>
+          <div className="engineer-card-top">
+            <strong>{a.visitDate ? `방문 ${a.visitDate}${a.visitTime ? ` ${a.visitTime}` : ''}` : '방문일 미정'}</strong>
+            <span className="status-chip st-red">AS · {a.category}</span>
+            <span className="sub-text">접수 {a.date}</span>
+          </div>
+          <div className="bold-text">
+            {a.address} <MapLink name={a.aptName} />
+          </div>
+          <div>
+            {a.customerName} · <a href={`tel:${a.customerPhone}`}>{a.customerPhone}</a>
+            {a.customerPhone2 && <> · <a href={`tel:${a.customerPhone2}`}>{a.customerPhone2}</a></>}
+          </div>
+          <div className="as-request-text">요청: {a.request}</div>
+          {a.photoCount > 0 && (
+            <button type="button" className="btn-receipt" onClick={() => showPhotos(a)}>📷 사진 {a.photoCount}장 보기</button>
+          )}
+          <div className="as-visit-form">
+            <select className="input-text as-mode" value={val(a).mode} onChange={(e) => put(a, { mode: e.target.value })}>
+              <option value="visit">{a.visitDate ? '방문일 변경' : '방문일 등록'}</option>
+              <option value="transfer">시공기사 변경</option>
+            </select>
+            {val(a).mode === 'visit' ? (
+              <>
+                <input type="date" className="input-text" value={val(a).date} onChange={(e) => put(a, { date: e.target.value })} />
+                <select className="input-text" value={val(a).time} onChange={(e) => put(a, { time: e.target.value })}>
+                  <option value="">시간 무관</option>
+                  {AS_TIMES.map((t) => <option key={t} value={t}>{t}</option>)}
+                </select>
+              </>
+            ) : (
+              <select className="input-text" value={val(a).engineerId} onChange={(e) => put(a, { engineerId: e.target.value })}>
+                <option value="">넘길 기사님 고르기</option>
+                {mates.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+              </select>
+            )}
+            <button type="button" className="btn-confirm" onClick={() => save(a)}>작성</button>
+          </div>
+        </div>
+      ))}
+      {photos && <PhotoViewer images={photos.images} start={0} title={photos.title} onClose={() => setPhotos(null)} />}
+    </div>
+  );
+}
+
 function MySchedules() {
   const { handleError } = useAuth();
+  const asOn = currentHasFeature('asEngineer') && currentHasFeature('as');
+  const [asItems, setAsItems] = useState([]);
+  const loadAs = useCallback(() => {
+    if (asOn) engineerApp.myAs().then(setAsItems).catch(() => {});
+  }, [asOn]);
+  useEffect(() => {
+    loadAs();
+  }, [loadAs]);
+  useRefreshOnReturn(loadAs);
+  const asPending = asItems.filter((a) => !a.visitDate).length;
   const [view, setView] = useState(memo.view); // calendar | upcoming | past
   const [ym, setYm] = useState(memo.ym || [new Date().getFullYear(), new Date().getMonth() + 1]);
   const [picked, setPicked] = useState(memo.date || today());
@@ -147,11 +266,18 @@ function MySchedules() {
 
   return (
     <div className="engineer-body">
-      <div className="radio-btn-group">
+      <div className="radio-btn-group engineer-view-tags">
         {tag('calendar', '달력')}
         {tag('upcoming', '오늘 이후 30일')}
         {tag('past', '지난 30일')}
+        {asOn && (
+          <label className={`radio-tag as-tag ${view === 'as' ? 'selected' : ''}`}>
+            <input type="radio" checked={view === 'as'} onChange={() => setView('as')} /> AS관리{asItems.length > 0 && <b className="as-count">{asItems.length}</b>}
+          </label>
+        )}
       </div>
+      {asPending > 0 && view !== 'calendar' && view !== 'as' && <AsAlert count={asPending} onOpen={() => setView('as')} />}
+      {view === 'as' && <MyAsList items={asItems} onSaved={loadAs} />}
 
       {view === 'calendar' && (
         <>
@@ -161,6 +287,7 @@ function MySchedules() {
             <button type="button" className="btn-month-nav" onClick={() => move(1)} aria-label="다음 달">&gt;</button>
             <button type="button" className="btn-today-sm" onClick={goToday}>오늘</button>
           </div>
+          {asPending > 0 && <AsAlert count={asPending} onOpen={() => setView('as')} />}
           <div className="calendar-grid-wrapper">
             <div className="calendar-weekdays">
               {WEEKDAYS.map((w, i) => (
@@ -191,8 +318,8 @@ function MySchedules() {
         </>
       )}
 
-      {grouped.length === 0 && <p className="no-data">배정된 일정이 없습니다.</p>}
-      {grouped.map(([date, rows]) => (
+      {view !== 'as' && grouped.length === 0 && <p className="no-data">배정된 일정이 없습니다.</p>}
+      {view !== 'as' && grouped.map(([date, rows]) => (
         <section key={date}>
           <h4 className={`engineer-date ${date === today() ? 'is-today' : ''}`}>
             {formatKoreanDate(date)}
@@ -212,7 +339,7 @@ function MySchedules() {
             <div className="engineer-card empty">{date === today() ? '오늘' : '이 날'} 배정된 일정이 없습니다.</div>
           )}
           {rows.map((s) => (
-            <ScheduleCard key={`${s.contractId}-${s.stepIndex}`} s={s} onReported={load} />
+            <ScheduleCard key={s.isAs ? `as-${s.contractId}-${s.asIndex}` : `${s.contractId}-${s.stepIndex}`} s={s} onReported={load} />
           ))}
         </section>
       ))}
@@ -221,7 +348,63 @@ function MySchedules() {
 }
 
 // 일정 카드: 위쪽(현장·고객·내용)을 누르면 계약 상세로, 아래는 현장 보고
+// 방문일을 등록한 AS: 일정 카드에 'AS' 로 표시 (시공 보고 대신 요청 내용)
+function AsScheduleCard({ s, onReported }) {
+  return (
+    <div className="engineer-card as-schedule-card">
+      <div className="engineer-card-top">
+        <strong>{s.time || '시간 무관'}</strong>
+        <span className="status-chip st-red">AS · {s.category}</span>
+        <span className="as-step">AS</span>
+        {s.doneAt && <span className="status-chip st-green">AS 완료</span>}
+      </div>
+      <div className="bold-text">
+        {s.address} <MapLink name={s.aptName} />
+      </div>
+      <div>
+        {s.customerName} · <a href={`tel:${s.customerPhone}`}>{s.customerPhone}</a>
+      </div>
+      <div className="as-request-text">요청: {s.request}</div>
+      {currentHasFeature('asReport') && <AsReportForm s={s} onReported={onReported} />}
+    </div>
+  );
+}
+
+// AS 현장 보고: 상태 + 메모 → 사무실 AS 내역에 표시, '시공완료'면 AS 완료
+function AsReportForm({ s, onReported }) {
+  const { handleError } = useAuth();
+  const [d, setD] = useState({ mobileStatus: s.mobileStatus || '', memo: s.mobileMemo || '' });
+  useEffect(() => setD({ mobileStatus: s.mobileStatus || '', memo: s.mobileMemo || '' }), [s.mobileStatus, s.mobileMemo]);
+  if (s.doneAt) {
+    return <div className="sub-text">보고: {s.mobileStatus || 'AS 완료'}{s.mobileMemo ? ` · ${s.mobileMemo}` : ''}</div>;
+  }
+  const report = async () => {
+    if (d.mobileStatus === '시공완료' && !window.confirm('시공완료로 보고하면 이 AS 가 완료 처리됩니다. 보고할까요?')) return;
+    try {
+      await engineerApp.reportAs(s.contractId, s.asIndex, d);
+      alert(d.mobileStatus === '시공완료' ? 'AS 완료로 보고되었습니다.' : '보고되었습니다. 사무실에 바로 표시됩니다.');
+      onReported?.();
+    } catch (e) {
+      handleError(e);
+    }
+  };
+  return (
+    <>
+      <div className="engineer-report">
+        <select className="input-text" value={d.mobileStatus} onChange={(e) => setD({ ...d, mobileStatus: e.target.value })}>
+          <option value="">입력 전</option>
+          {MOBILE_STATUS.map((m) => <option key={m} value={m}>{m}</option>)}
+        </select>
+        <input className="input-text" placeholder="보고 메모 (선택)" value={d.memo} onChange={(e) => setD({ ...d, memo: e.target.value })} maxLength={500} />
+        <button type="button" className="btn-confirm" onClick={report}>보고</button>
+      </div>
+      {s.reportedAt && <div className="sub-text">마지막 보고: {new Date(s.reportedAt).toLocaleString('ko-KR')}</div>}
+    </>
+  );
+}
+
 function ScheduleCard({ s, onReported }) {
+  if (s.isAs) return <AsScheduleCard s={s} onReported={onReported} />;
   const open = () => navigateForward(`/m/contract/${s.contractId}?step=${s.stepIndex}`);
   return (
     <div className="engineer-card">
@@ -232,7 +415,12 @@ function ScheduleCard({ s, onReported }) {
           <span className="sub-text">{s.stepIndex + 1}차{s.viaTeam ? ` · ${s.teamName}` : ''}</span>
           <span className="engineer-card-more">상세 ›</span>
         </div>
-        <div className="bold-text">{s.address}</div>
+        <div className="bold-text">
+          {s.address}{' '}
+          <span onClick={(e) => e.stopPropagation()}>
+            <MapLink name={s.aptName} />
+          </span>
+        </div>
         <div>
           {s.customerName} ·{' '}
           <a href={`tel:${s.customerPhone}`} onClick={(e) => e.stopPropagation()}>
@@ -278,6 +466,8 @@ function ReportForm({ contractId, step, onReported }) {
   const [color, setColor] = useState(step.workRecord?.color || '');
   const [helpers, setHelpers] = useState(step.workRecord?.helpers || '');
   const [note, setNote] = useState(step.workRecord?.note || '');
+  // 항목마다 자재·작업자 따로 적기 (기본은 접어 두고 공통 자재 한 칸만) — 예전에 항목별로 적은 기록이 있으면 펼쳐서 시작
+  const [perItem, setPerItem] = useState(() => (step.workRecord?.items || []).some((x) => x.material || x.color || x.worker));
   useEffect(() => {
     setD({ mobileStatus: step.mobileStatus || '', memo: step.mobileMemo || '' });
     setRows(initialRows());
@@ -287,7 +477,7 @@ function ReportForm({ contractId, step, onReported }) {
     setNote(step.workRecord?.note || '');
   }, [step.mobileStatus, step.mobileMemo, step.workRecord]); // eslint-disable-line react-hooks/exhaustive-deps
   const setRow = (k, patch) => setRows((prev) => ({ ...prev, [k]: { ...prev[k], ...patch } }));
-  const completing = d.mobileStatus === '시공완료'; // 상품이 없는 계약도 자재·함께한 사람·직접 적기 칸은 나옴
+  const completing = d.mobileStatus === '시공완료' && currentHasFeature('workRecord'); // 기능 꺼진 업체는 기록 칸 없이 상태만 보고 / 상품이 없는 계약도 자재·함께한 사람·직접 적기 칸은 나옴
 
   const report = async () => {
     const items = scope.flatMap((g) => g.parts.map((p) => ({ text: p, ...(rows[scopeKey(g.group, p)] || { done: true }) })));
@@ -322,6 +512,26 @@ function ReportForm({ contractId, step, onReported }) {
         <div className="scope-check">
           <div className="scope-check-title">🧾 시공 기록</div>
           <input className="input-text full" placeholder="함께한 팀장·작업자 (예: 김민수 팀장, 이지훈)" value={helpers} onChange={(e) => setHelpers(e.target.value)} maxLength={200} />
+          <div className="scope-common">
+            <span className="scope-common-label">{scope.length ? '공통 자재 (모든 항목에 적용)' : '사용 자재'}</span>
+            <textarea
+              className="input-text full scope-common-mat"
+              rows={2}
+              placeholder="자재 (예: 크린파파 위너스, 케라폭시) — 아래 목록에서 골라도 됩니다"
+              value={material}
+              onChange={(e) => setMaterial(e.target.value)}
+              maxLength={500}
+            />
+            <div className="scope-common-row">
+              <select className="input-text" value="" onChange={(e) => e.target.value && setMaterial(material ? `${material}, ${e.target.value}` : e.target.value)}>
+                <option value="">자재 목록에서 고르기</option>
+                {materials.map((m) => (
+                  <option key={m} value={m}>{m}</option>
+                ))}
+              </select>
+              <input className="input-text num" placeholder="번호(색상)" value={color} onChange={(e) => setColor(e.target.value)} maxLength={30} />
+            </div>
+          </div>
           {scope.map((g) => (
             <div key={g.group} className="scope-group">
               <div className="scope-group-name">{g.group}</div>
@@ -333,9 +543,9 @@ function ReportForm({ contractId, step, onReported }) {
                     <label className="scope-item">
                       <input type="checkbox" checked={r.done} onChange={(e) => setRow(k, { done: e.target.checked })} /> {p}
                     </label>
-                    {r.done && (
+                    {perItem && r.done && (
                       <div className="scope-row-fields">
-                        <input className="input-text mat" list={listId} placeholder="자재 (눌러서 고르기)" value={r.material} onChange={(e) => setRow(k, { material: e.target.value })} maxLength={100} />
+                        <input className="input-text mat" list={listId} placeholder="자재 (비우면 공통 자재)" value={r.material} onChange={(e) => setRow(k, { material: e.target.value })} maxLength={100} />
                         <input className="input-text num" placeholder="번호" value={r.color} onChange={(e) => setRow(k, { color: e.target.value })} maxLength={30} />
                         <input className="input-text worker" placeholder="작업자(팀장)" value={r.worker} onChange={(e) => setRow(k, { worker: e.target.value })} maxLength={50} />
                       </div>
@@ -345,13 +555,11 @@ function ReportForm({ contractId, step, onReported }) {
               })}
             </div>
           ))}
-          <div className="scope-common">
-            <span className="sub-text">{scope.length ? '공통 자재 (항목에 안 적으면 이것으로)' : '사용 자재'}</span>
-            <div className="scope-row-fields">
-              <input className="input-text mat" list={listId} placeholder="자재 (눌러서 고르기)" value={material} onChange={(e) => setMaterial(e.target.value)} maxLength={200} />
-              <input className="input-text num" placeholder="번호" value={color} onChange={(e) => setColor(e.target.value)} maxLength={30} />
-            </div>
-          </div>
+          {scope.length > 0 && (
+            <button type="button" className="scope-peritem-toggle" onClick={() => setPerItem(!perItem)}>
+              {perItem ? '− 항목별 입력 접기' : '＋ 항목마다 자재 · 작업자 따로 적기'}
+            </button>
+          )}
           <datalist id={listId}>
             {materials.map((m) => (
               <option key={m} value={m} />
@@ -359,7 +567,7 @@ function ReportForm({ contractId, step, onReported }) {
           </datalist>
           <textarea
             className="input-text full scope-note"
-            rows={3}
+            rows={13}
             placeholder="직접 적기 (예: 고객 요청으로 현관 추가 시공, 샤워벽은 다음 방문)"
             value={note}
             onChange={(e) => setNote(e.target.value)}
@@ -375,7 +583,7 @@ function ReportForm({ contractId, step, onReported }) {
 }
 
 // 계약 상세 (기사용): 실장 계약 상세와 같은 모양 — 계약정보 / 시공정보 / 상세시공 (보기 전용 + 내 회차 보고)
-const CIRCLED = ['①', '②', '③'];
+const CIRCLED = ['①', '②', '③', '④'];
 const siteText = (c) =>
   [c.aptName, c.dong && `${c.dong}동`, c.ho && `${c.ho}호`, c.aptType && `타입 : ${c.aptType}`, c.area && `평 : ${c.area}`].filter(Boolean).join(' ') || c.address;
 const scheduleLine = (s) => (s?.date ? `${s.date}(${timeLabel(s) || '무관'})` : '');
@@ -387,7 +595,7 @@ const telLinks = (c) =>
   ));
 
 function ContractView({ id, step }) {
-  const { handleError } = useAuth();
+  const { user, handleError } = useAuth();
   const [data, setData] = useState(null);
   const [selectedId, setSelectedId] = useState(id);
   const [error, setError] = useState('');
@@ -439,7 +647,9 @@ function ContractView({ id, step }) {
             <th>계약담당</th>
             <td>{c.ownerName}</td>
             <th>현장</th>
-            <td>{siteText(c)}</td>
+            <td>
+              {siteText(c)} <MapLink name={c.aptName} />
+            </td>
           </tr>
           <tr>
             <th>입주예정일</th>
@@ -459,6 +669,26 @@ function ContractView({ id, step }) {
           )}
         </tbody>
       </table>
+      {/* 시공 사진 (기능 stepPhotos): 내 회차는 올리기, 다른 회차는 보기만 — 지우기는 내가 올린 사진만 */}
+      {currentHasFeature('stepPhotos') &&
+        c.schedules
+          .filter((s) => s.mine || s.photoCount)
+          .map((s) => (
+            <StepPhotos
+              key={`${c.id}-${s.stepIndex}`}
+              api={{
+                list: (i) => engineerApp.stepPhotos(c.id, i),
+                add: (i, photos) => engineerApp.addStepPhotos(c.id, i, photos),
+                remove: (photoId) => engineerApp.removeStepPhoto(c.id, photoId),
+              }}
+              stepIndex={s.stepIndex}
+              label={`${CIRCLED[s.stepIndex]} ${s.stepIndex + 1}차${s.date ? ` (${s.date})` : ''}`}
+              count={s.photoCount || 0}
+              canUpload={s.mine}
+              canDelete={(p) => s.mine && p.byName === user.name}
+              onError={handleError}
+            />
+          ))}
 
       <h3 className="form-section-title">&gt; 시공정보 — No.{c.no ?? '-'} {c.category}</h3>
       <table className="info-grid">
@@ -480,7 +710,7 @@ function ContractView({ id, step }) {
           <tr>
             <th>시공 등록</th>
             <td colSpan={2}>
-              {[0, 1, 2].map((i) => (
+              {[0, 1, 2, 3].map((i) => (
                 <div key={i} className={c.schedules[i]?.mine ? 'my-step' : ''}>
                   {CIRCLED[i]} : {scheduleLine(c.schedules[i])}
                 </div>
@@ -488,7 +718,7 @@ function ContractView({ id, step }) {
             </td>
             <th>시공담당</th>
             <td colSpan={2}>
-              {[0, 1, 2].map((i) => (
+              {[0, 1, 2, 3].map((i) => (
                 <div key={i} className={c.schedules[i]?.mine ? 'my-step' : ''}>
                   {CIRCLED[i]} : {c.schedules[i]?.assigneeName || ''}
                   {c.schedules[i]?.mine && <span className="sub-text"> (나)</span>}
@@ -575,14 +805,14 @@ function ContractView({ id, step }) {
                   <LineItems lines={x.lineItems} kind="추가시공품목" withDetail={false} extra={x.items} />
                 </td>
                 <td className="text-left nowrap">
-                  {[0, 1, 2].map((i) => (
+                  {[0, 1, 2, 3].map((i) => (
                     <div key={i}>
                       {CIRCLED[i]} {scheduleLine(x.schedules[i])}
                     </div>
                   ))}
                 </td>
                 <td className="text-left nowrap">
-                  {[0, 1, 2].map((i) => (
+                  {[0, 1, 2, 3].map((i) => (
                     <div key={i}>
                       {CIRCLED[i]} : {x.schedules[i]?.assigneeName || ''}
                     </div>
@@ -598,7 +828,7 @@ function ContractView({ id, step }) {
 }
 
 function MyOffs() {
-  const { handleError } = useAuth();
+  const { handleError, company } = useAuth();
   const now = new Date();
   const [year, setYear] = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth() + 1);
@@ -703,6 +933,8 @@ function MyOffs() {
           onClose={() => setTarget(null)}
         />
       )}
+      {/* 기사님에게만 보이는 곳: 기사모바일을 앱으로 설치 */}
+      <InstallCard code={company?.code} app="engineer" />
     </div>
   );
 }

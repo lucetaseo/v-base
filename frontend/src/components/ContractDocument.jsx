@@ -1,7 +1,7 @@
 import React from 'react';
 import { calcAmounts, timeLabel } from '../utils/contract.js';
 import { formatAddress, won } from '../utils/format.js';
-import { MOLD_PRICE, MOLD_ROOMS, PAINT_PLACES, PAINT_STYLE_CATEGORIES, REVIEW_PAYBACK, contractTermsFor, isMoldLine, moldLineName, termSection } from '../constants.js';
+import { MOLD_PRICE, MOLD_ROOMS, PAINT_PLACES, REVIEW_PAYBACK, contractTermsFor, isMoldLine, isPaintStyle, moldLineName, termSection } from '../constants.js';
 
 // 계약 조건: 서명한 계약서는 서명 당시 조건, 아니면 업체·브랜드별 조건
 const termsOf = (esign, company, brand, categories) =>
@@ -18,8 +18,8 @@ const uniq = (arr) => [...new Set(arr.filter(Boolean))];
 //   contracts 를 주면 같은 계약자·현장의 시공들(줄눈·청소 등)을 한 장으로 보여줌
 export default function ContractDocument({ contract, contracts, company, showAmount = true, showStatus = false }) {
   const list = contracts?.length ? contracts : [contract];
-  // 탄성·페인트 계약은 신화탄성 종이 계약서와 같은 양식
-  if (list.every((c) => PAINT_STYLE_CATEGORIES.includes(c.category))) {
+  // 신화탄성 양식(기능 paintContract)인 업체의 탄성·페인트 계약은 신화탄성 종이 계약서와 같은 양식
+  if (list.every((c) => isPaintStyle(company, c.category))) {
     return <PaintDocument list={list} company={company} showAmount={showAmount} showStatus={showStatus} />;
   }
   const first = list[0];
@@ -113,14 +113,19 @@ export default function ContractDocument({ contract, contracts, company, showAmo
       <ContractTerms terms={terms} />
 
       <div className="doc-sign">
-        <div>
+        <div className="doc-sign-names">
+          {first.ownerName && (
+            <div>
+              상담자: <strong>{first.ownerName}</strong>
+            </div>
+          )}
           계약자: <strong>{esign.signerName || first.customerName}</strong>
           {esign.signedAt && <span className="sub-text"> (서명일시 {new Date(esign.signedAt).toLocaleString('ko-KR')})</span>}
         </div>
         {esign.signature ? (
           <img src={esign.signature} alt="서명" className="doc-signature" />
         ) : (
-          <div className="doc-signature empty">{esign.status === '서명완료' ? '(서명 이미지 없음)' : '(서명 전)'}</div>
+          <div className="doc-signature empty">{esign.status === '서명완료' ? (esign.paperMarked ? '(종이 계약서로 서명 완료)' : '(서명 이미지 없음)') : '(서명 전)'}</div>
         )}
       </div>
     </div>
@@ -251,7 +256,7 @@ const box = (on) => (on ? '☑' : '☐');
 const manwon = (n) => `${won(n / 10000)}만원`;
 const METHOD_LABEL = { 현금: '현금', 계좌이체: '이체', 카드: '카드' };
 
-// 탄성·페인트 계약서 (신화탄성 종이 계약서 양식)
+// 신화탄성 탄성·페인트 계약서 (신화탄성 종이 계약서 양식, v-base 에서 가져옴)
 //   위: 아파트명·동호수(타입)·고객명·연락처 / 제품명·시공장소·품질보증·금액·비고(구역)
 //   곰팡이방지 살균시공 · AS 보장범위 / 최종 계약금액 안내 / 비고(계약 조항) + 업체 정보 / 서명
 function PaintDocument({ list, company, showAmount, showStatus }) {
@@ -469,16 +474,20 @@ function PaintDocument({ list, company, showAmount, showStatus }) {
       </div>
 
       <div className="doc-sign">
-        <div>
+        <div className="doc-sign-names">
           {signDate.getFullYear()}년 {signDate.getMonth() + 1}월 {signDate.getDate()}일 위 계약 내용에 동의하여 서명합니다.
-          <br />
+          {first.ownerName && (
+            <div>
+              상담자: <strong>{first.ownerName}</strong>
+            </div>
+          )}
           계약자: <strong>{esign.signerName || first.customerName}</strong>
           {esign.signedAt && <span className="sub-text"> (서명일시 {new Date(esign.signedAt).toLocaleString('ko-KR')})</span>}
         </div>
         {esign.signature ? (
           <img src={esign.signature} alt="서명" className="doc-signature" />
         ) : (
-          <div className="doc-signature empty">{esign.status === '서명완료' ? '(서명 이미지 없음)' : '(서명 전)'}</div>
+          <div className="doc-signature empty">{esign.status === '서명완료' ? (esign.paperMarked ? '(종이 계약서로 서명 완료)' : '(서명 이미지 없음)') : '(서명 전)'}</div>
         )}
       </div>
     </div>

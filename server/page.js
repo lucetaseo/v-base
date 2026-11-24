@@ -3,7 +3,7 @@
 //   화면 프로그램이 돌기 전의 HTML·앱 정보(manifest)만 읽기 때문 (브라우저 탭 이름은 화면이 따로 바꿈)
 
 // 업체 주소가 아닌 첫 단어 (화면 이름 — frontend/src/router.js 의 PAGES 와 같게)
-const PAGES = new Set(['c', 'e', 'm', 't', 'consult', 'contracts', 'customers', 'schedule', 'progress', 'stats', 'admin', 'settings', 'me', 'engineer', 'sign', 'api', 'assets']);
+const PAGES = new Set(['c', 'e', 'm', 't', 'consult', 'contracts', 'customers', 'schedule', 'calls', 'progress', 'stats', 'admin', 'settings', 'me', 'engineer', 'sign', 'api', 'assets']);
 const KINDS = {
   '': { label: '일반화면', desc: '전자계약 · 시공일정 관리', short: (n) => n },
   t: { label: '상담실장', desc: '상담실장 전용 · 계약 등록과 상담 관리', short: (n) => `${n} 상담` },
@@ -14,8 +14,9 @@ const KINDS = {
 export const validCode = (code) => /^[a-z0-9-]{2,30}$/.test(String(code || '').toLowerCase()) && !PAGES.has(String(code).toLowerCase());
 export const validKind = (kind) => Object.prototype.hasOwnProperty.call(KINDS, kind || '');
 
-// 주소 → { title, short, desc, start } (업체 이름이 없으면 null)
-export function pageMeta(code, kind = '', companyName = '') {
+// 주소 → { title, short, desc, start, web } (업체 이름이 없으면 null)
+//   web: 주소 끝 ?web=1 — '브라우저처럼' 열리는 바로가기용 (앱 창 대신 주소창 있는 브라우저로 열림)
+export function pageMeta(code, kind = '', companyName = '', web = false) {
   const k = KINDS[kind || ''];
   const name = String(companyName || '').trim();
   if (!k || !name || !validCode(code)) return null;
@@ -25,42 +26,57 @@ export function pageMeta(code, kind = '', companyName = '') {
     short: k.short(name),
     desc: `${name} ${k.desc}`,
     start: `/${c}${kind ? `/${kind}` : ''}`,
+    kind: kind || '',
+    web: !!web,
   };
 }
+
+// 화면마다 다른 앱 아이콘 (바탕화면에서 구분되게): 일반 파랑 VB · 상담실장 초록 '상담' · 기사모바일 주황 '기사'
+const ICON_KINDS = new Set(['t', 'm']);
+export const iconSuffix = (kind) => (ICON_KINDS.has(kind) ? `-${kind}` : '');
 
 const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
 // index.html 에 이름 넣기: <title>, 홈 화면 이름(iOS), 링크 미리보기(og), 앱 정보(manifest) 주소
 export function injectMeta(html, meta) {
   if (!meta) return html;
-  const manifest = `/api/page?manifest=1&code=${encodeURIComponent(meta.start.split('/')[1])}&kind=${encodeURIComponent(meta.start.split('/')[2] || '')}`;
+  const manifest = `/api/page?manifest=1&code=${encodeURIComponent(meta.start.split('/')[1])}&kind=${encodeURIComponent(meta.start.split('/')[2] || '')}${meta.web ? '&web=1' : ''}`;
   let out = String(html)
     .replace(/<title>[^<]*<\/title>/, `<title>${esc(meta.title)}</title>`)
     .replace(/(<meta name="apple-mobile-web-app-title" content=")[^"]*(")/, `$1${esc(meta.short)}$2`)
-    .replace(/(<link rel="manifest" href=")[^"]*(")/, `$1${esc(manifest)}$2`);
+    .replace(/(<link rel="manifest" href=")[^"]*(")/, `$1${esc(manifest)}$2`)
+    .replace(/(<link rel="apple-touch-icon" href=")[^"]*(")/, `$1/apple-touch-icon${iconSuffix(meta.kind)}.png$2`);
   const og = [
     `<meta property="og:title" content="${esc(meta.title)}" />`,
     `<meta property="og:description" content="${esc(meta.desc)}" />`,
     `<meta property="og:site_name" content="VerityBase" />`,
     `<meta property="og:image" content="/icon-512.png" />`,
     `<meta name="description" content="${esc(meta.desc)}" />`,
+    // 아이폰 홈 화면 바로가기: 기본은 앱처럼(주소창 없이), ?web=1 주소는 브라우저처럼
+    ...(meta.web ? [] : ['<meta name="apple-mobile-web-app-capable" content="yes" />', '<meta name="mobile-web-app-capable" content="yes" />']),
   ].join('\n    ');
   out = out.replace('</head>', `    ${og}\n  </head>`);
   return out;
 }
 
-// 홈 화면 앱 정보 (안드로이드는 이 이름을 아이콘 아래에 씀). 주소마다 다른 앱으로 보이게 id·start_url 을 따로
+// 홈 화면·PC 앱 정보 (안드로이드는 이 이름을 아이콘 아래에 씀). 주소마다 다른 앱으로 보이게 id·start_url 을 따로
+//   기본: 앱처럼(standalone — 주소창 없는 앱 창, PC 크롬·엣지 [앱 설치] 가능)
+//   ?web=1: 브라우저처럼(browser — 바로가기를 누르면 브라우저 탭으로)
 export function manifestFor(meta) {
+  const start = meta ? `${meta.start}${meta.web ? '?web=1' : ''}` : '/';
   return {
-    name: meta ? meta.title : 'VerityBase',
+    name: meta ? `${meta.title}${meta.web ? ' (브라우저)' : ''}` : 'VerityBase',
     short_name: meta ? meta.short : 'VerityBase',
-    ...(meta ? { id: meta.start, start_url: meta.start } : {}),
+    id: start,
+    start_url: start,
+    scope: '/',
     icons: [
-      { src: '/icon-512.png', sizes: '512x512', type: 'image/png' },
-      { src: '/apple-touch-icon.png', sizes: '180x180', type: 'image/png' },
+      { src: `/icon-192${iconSuffix(meta?.kind)}.png`, sizes: '192x192', type: 'image/png', purpose: 'any' },
+      { src: `/icon-512${iconSuffix(meta?.kind)}.png`, sizes: '512x512', type: 'image/png', purpose: 'any' },
+      { src: `/apple-touch-icon${iconSuffix(meta?.kind)}.png`, sizes: '180x180', type: 'image/png' },
     ],
     theme_color: '#1a6fe0',
     background_color: '#ffffff',
-    display: 'browser',
+    display: meta?.web ? 'browser' : 'standalone',
   };
 }

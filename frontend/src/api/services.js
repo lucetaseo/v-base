@@ -23,9 +23,10 @@ import {
 } from './runtime.js';
 import { ROLES, DATA_SCOPES, permissionsOf, isOwnScopeOnly, ALL_PERMISSION_KEYS, can } from '../auth/permissions.js';
 import { digitsOnly, formatPhone } from '../utils/format.js';
+import { CATEGORIES, COMPANY_DOC_FIELDS, DEPARTMENTS, brandTerms, companyCategories, hasFeature, parseCategories, parseFeatures, purchaseCategories, termsSource } from '../constants.js';
 import { today } from '../utils/date.js';
-import { CATEGORIES, COMPANY_DOC_FIELDS, DEPARTMENTS, PURCHASE_CATEGORIES, brandTerms, termsSource } from '../constants.js';
-import { AUDIT_KEEP_DAYS, auditText, skipAudit } from './audit.js';
+import { AUDIT_KEEP_DAYS, UNDO_KEEP, auditText, skipAudit, undoComparable } from './audit.js';
+import { addHistory } from './views.js';
 import {
   ApiError,
   authorize,
@@ -38,10 +39,13 @@ import {
   session,
   validatePassword,
   readableContracts,
+  requireFeature,
+  companyOf,
 } from './core.js';
 
 export { ApiError } from './core.js';
 export { contracts, esign, notifications, reports, imports, customerApp } from './contracts.js';
+export { companyFiles } from './files.js';
 export { schedules, engineerOffs, engineerApp, scheduleSettings, fairs } from './schedule.js';
 
 // ============================================================
@@ -64,7 +68,66 @@ export const auditLogs = {
       if (text && !`${r.actor?.name} ${r.action} ${auditText(r)}`.includes(text)) return false;
       return true;
     });
-    return { keepDays: AUDIT_KEEP_DAYS, demo: !db.auditLogs, rows: clone(rows.slice(0, 1000)) };
+    // 되돌린 기록 표시: 다른 기록의 undoOf 가 이 기록을 가리키면 '되돌림'
+    const undone = new Map((db.auditLogs || []).filter((r) => r.undoOf).map((r) => [Number(r.undoOf), r]));
+    const canUndo = hasFeature(companyOf(db, user), 'auditUndo');
+    return {
+      keepDays: AUDIT_KEEP_DAYS,
+      demo: !db.auditLogs,
+      canUndo,
+      rows: clone(
+        rows.slice(0, 1000).map(({ undo, ...r }) => {
+          const by = undone.get(r.id);
+          return { ...r, canUndo: canUndo && !!(undo?.length || r.hasUndo) && !by, undoneAt: by?.at || null, undoneBy: by?.actor?.name || '' };
+        }),
+      ),
+    };
+  },
+
+  // 되돌리기: 그 기록이 바꾼 행을 바뀌기 전으로 (업체 관리자만)
+  //   그 뒤에 같은 자료를 또 바꿨으면 막음 (나중 수정을 덮어쓰지 않게) — 나중 기록부터 차례로 되돌리면 됨
+  async undo(logId) {
+    const { db, user } = await session();
+    if (user.role !== ROLES.ADMIN) throw new ApiError('업체 관리자만 되돌릴 수 있습니다.', 'FORBIDDEN');
+    requireFeature(db, user, 'auditUndo');
+    if (!db.auditLogs) throw new ApiError('데모 모드에서는 되돌리기를 쓸 수 없습니다.');
+    const target = db.auditLogs.find((r) => r.id === Number(logId));
+    if (!target) throw new ApiError('기록을 찾을 수 없습니다. (2주 지난 기록은 지워집니다)', 'NOT_FOUND');
+    if (db.auditLogs.some((r) => Number(r.undoOf) === target.id)) throw new ApiError('이미 되돌린 기록입니다.');
+    const undo = target.undo; // 되돌리기 기록도 다시 되돌릴 수 있음 (다시 적용)
+    if (!Array.isArray(undo) || !undo.length) throw new ApiError('이 기록은 되돌릴 수 없습니다. (되돌리기 기능이 생기기 전 기록, 또는 알림톡 발송·대량 가져오기 등)');
+    const mine = (table, row) => (table === 'companies' ? row.id === user.companyId : row.companyId === user.companyId);
+    // 먼저 모두 확인하고 (하나라도 안 되면 아무것도 바꾸지 않음)
+    for (const ch of undo) {
+      const list = db[ch.table];
+      if (!Array.isArray(list)) throw new ApiError('되돌릴 수 없는 자료가 들어 있습니다.');
+      if (![ch.before, ch.after].filter(Boolean).every((r) => mine(ch.table, r))) throw new ApiError('권한이 없습니다.', 'FORBIDDEN');
+      const now = list.find((r) => r.id === ch.id) || null;
+      if (undoComparable(now) !== undoComparable(ch.after)) {
+        throw new ApiError('그 뒤에 같은 자료가 또 바뀌어서 되돌릴 수 없습니다. 더 나중 기록부터 차례로 되돌려 주세요.');
+      }
+    }
+    for (const ch of undo) {
+      const list = db[ch.table];
+      const i = list.findIndex((r) => r.id === ch.id);
+      if (!ch.before) {
+        list.splice(i, 1); // 그때 새로 생긴 것 → 없앰
+        continue;
+      }
+      const now = i >= 0 ? list[i] : null;
+      const row = clone(ch.before);
+      UNDO_KEEP.forEach((k) => {
+        if (now && k in now) row[k] = now[k];
+      });
+      if (ch.table === 'contracts') {
+        row.history = now?.history || ch.before.history || [];
+        addHistory(row, user, '되돌리기 (수정로그)', [{ label: '작업', from: '', to: target.action || '' }]);
+      }
+      if (i >= 0) list[i] = row;
+      else list.push(row); // 그때 지운 것 → 다시 살림
+    }
+    saveDb(db);
+    return { ok: true };
   },
 };
 
@@ -99,6 +162,7 @@ export const auth = {
       if (!user.active) throw new ApiError('사용이 중지된 계정입니다. 관리자에게 문의해 주세요.');
       const err = companyAccessError(db, user);
       if (err) throw new ApiError(err);
+      if (kind === 'manager') requireFeature(db, user, 'manager'); // 상담실장 화면을 끈 업체
       user.lastLoginAt = nowIso();
       saveDb(db);
       await setSession({ userId: user.id });
@@ -124,7 +188,8 @@ export const auth = {
   async me() {
     const { db, user } = await session();
     const company = db.companies.find((c) => c.id === user.companyId) || null;
-    return { user: publicUser(user), company: company && clone(company) };
+    const { files: _files, ...co } = company || {}; // eslint-disable-line no-unused-vars -- 회사 자료 목록은 그 화면에서만 받음
+    return { user: publicUser(user), company: company && clone(co) };
   },
 
   async changePassword(currentPassword, newPassword) {
@@ -144,7 +209,7 @@ export const auth = {
 // ============================================================
 
 // 업체 주소 코드: veritybase.vercel.app/{코드}  (영문 소문자로 시작, 영문 소문자·숫자·-, 2~20자)
-export const RESERVED_CODES = ['admin', 'api', 'sign', 'contracts', 'customers', 'schedule', 'progress', 'stats', 'settings', 'me', 'engineer', 'assets', 'login', 'uffice', 'www', 'c', 'e', 'm'];
+export const RESERVED_CODES = ['admin', 'api', 'sign', 'contracts', 'customers', 'schedule', 'calls', 'progress', 'stats', 'settings', 'me', 'engineer', 'assets', 'login', 'uffice', 'www', 'c', 'e', 'm'];
 function normalizeCode(db, code, exceptId) {
   const v = String(code || '').trim().toLowerCase();
   if (!/^[a-z][a-z0-9-]{1,19}$/.test(v)) throw new ApiError('업체 주소 코드는 영문 소문자로 시작하는 영문·숫자·- 2~20자로 입력해 주세요. (예: thegood)');
@@ -188,9 +253,11 @@ export const companies = {
       ceo: company.ceo || '',
       bizNo: company.bizNo || '',
       address: company.address || '',
-      // 계약서 하단 업체 정보 (업태·종목·고객센터·휴대번호·빠른문의)
-      ...Object.fromEntries(COMPANY_DOC_FIELDS.map((k) => [k, String(company[k] || '').trim()])),
+      // 계약서 하단 업체 정보 (신화탄성 양식: 업태·종목·고객센터·휴대번호·빠른문의)
+      ...Object.fromEntries(COMPANY_DOC_FIELDS.map((k) => [k, String(company[k] || '').trim().slice(0, 50)])),
       brands: company.brands?.length ? company.brands : [company.name.trim()],
+      ...(parseCategories(company.categories).length ? { categories: parseCategories(company.categories) } : {}),
+      ...(company.features ? { features: parseFeatures(company.features) } : {}),
       periodStart: company.periodStart,
       periodEnd: company.periodEnd,
       active: true,
@@ -210,7 +277,14 @@ export const companies = {
     const c = db.companies.find((x) => x.id === id);
     if (!c) throw new ApiError('업체를 찾을 수 없습니다.', 'NOT_FOUND');
     if ('code' in patch) patch = { ...patch, code: normalizeCode(db, patch.code, c.id) };
-    const allowed = ['code', 'name', 'ceo', 'bizNo', 'address', ...COMPANY_DOC_FIELDS, 'brands', 'periodStart', 'periodEnd', 'active'];
+    // 시공 구분: 운영자가 정한 순서 그대로 (비우면 기본 목록)
+    if ('categories' in patch) patch = { ...patch, categories: parseCategories(patch.categories) };
+    // 기능 스위치: 아는 기능 이름의 켜기/끄기만 저장
+    if ('features' in patch) patch = { ...patch, features: parseFeatures(patch.features) };
+    COMPANY_DOC_FIELDS.forEach((k) => {
+      if (k in patch) patch = { ...patch, [k]: String(patch[k] || '').trim().slice(0, 50) };
+    });
+    const allowed = ['code', 'name', 'ceo', 'bizNo', 'address', ...COMPANY_DOC_FIELDS, 'brands', 'categories', 'features', 'periodStart', 'periodEnd', 'active'];
     allowed.forEach((k) => {
       if (k in patch) c[k] = patch[k];
     });
@@ -225,7 +299,7 @@ export const companies = {
     const { db, user } = await session();
     if (user.role !== ROLES.SUPER) throw new ApiError('운영자만 볼 수 있습니다.', 'FORBIDDEN');
     return {
-      categories: [...CATEGORIES],
+      categories: [...new Set(db.companies.flatMap((c) => companyCategories(c)))],
       companies: db.companies.map((c) => {
         const brands = c.brands?.length ? c.brands : Object.keys(c.contractTerms || {});
         return {
@@ -451,8 +525,9 @@ export const engineers = masterTable('engineers', {
     const teamId = db.teams.some((t) => t.id === Number(d.teamId) && t.companyId === user.companyId && t.kind === '시공팀')
       ? Number(d.teamId)
       : null;
+    const coCats = companyCategories(db.companies.find((c) => c.id === user.companyId));
     const categories = Array.isArray(d.categories)
-      ? CATEGORIES.filter((c) => d.categories.includes(c))
+      ? coCats.filter((c) => d.categories.includes(c)) // 업체 구분 순서대로
       : categoriesOf({ category: d.category });
     return {
       name: required(d.name, '기사 이름을 입력해 주세요.'),
@@ -510,7 +585,7 @@ export const products = masterTable('products', {
     detail: d.detail || '',
     freeDetail: d.freeDetail || '', // 무료시공내역
     price: Math.max(0, Number(d.price) || 0),
-    warranty: String(d.warranty || '').trim().slice(0, 30), // 품질보증 A/S 기간 (탄성·페인트 계약서)
+    warranty: String(d.warranty || '').trim().slice(0, 30), // 품질보증 A/S 기간 (신화탄성 양식 계약서, 비우면 '')
     visible: d.visible !== false,
   }),
 });
@@ -572,8 +647,9 @@ export const apartments = {
 };
 
 // ============================================================
-// 매입 (통계정보 > 매입관리): 자재·인건비 등 업체가 쓴 비용을 날짜별로 적어 두고 통계에서 매출과 비교
-//   조회·등록·수정·삭제 모두 purchase.manage 권한
+// 매입·매출 (통계정보 > 매입·매출관리): 쓴 비용(매입: 자재·인건비·박람회비 등)과 계약 밖의 수입(매출)을
+//   날짜별로 적어 두고 통계에서 계약 매출과 함께 비교. kind: '매입' | '매출' (예전 자료는 없음 = 매입)
+//   조회·등록·수정·삭제 모두 purchase.manage 권한 + 업체 기능 purchases (운영자가 켬)
 // ============================================================
 function findPurchase(db, user, id) {
   const row = db.purchases.find((r) => r.id === Number(id) && r.companyId === user.companyId);
@@ -584,6 +660,7 @@ function findPurchase(db, user, id) {
 export const purchases = {
   async list({ from = '', to = '' } = {}) {
     const { db, user } = await authorize('purchase.manage');
+    requireFeature(db, user, 'purchases');
     return clone(
       db.purchases
         .filter((r) => r.companyId === user.companyId && (!from || r.date >= from) && (!to || r.date <= to))
@@ -594,15 +671,18 @@ export const purchases = {
   // stockItemId·stockQty: 재고 품목을 고르면 그 수량만큼 재고에 '입고'도 함께 기록 (재고 권한이 있을 때만)
   async save(d = {}) {
     const { db, user } = await authorize('purchase.manage');
+    requireFeature(db, user, 'purchases');
     const date = String(d.date || '').trim();
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new ApiError('매입일을 입력해 주세요.');
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new ApiError('날짜를 입력해 주세요.');
     const amount = Math.round(Number(String(d.amount ?? '').replace(/,/g, '')));
-    if (!Number.isFinite(amount) || amount <= 0) throw new ApiError('매입 금액을 1원 이상으로 입력해 주세요.');
+    if (!Number.isFinite(amount) || amount <= 0) throw new ApiError('금액을 1원 이상으로 입력해 주세요.');
+    const kind = d.kind === '매출' ? '매출' : '매입';
     const fields = {
+      kind,
       date,
-      category: PURCHASE_CATEGORIES.includes(d.category) ? d.category : '공통',
+      category: purchaseCategories(companyOf(db, user)).includes(d.category) ? d.category : '공통',
       vendor: String(d.vendor || '').trim(), // 거래처
-      item: required(d.item, '매입 내용(품목)을 입력해 주세요.'),
+      item: required(d.item, '내용(품목)을 입력해 주세요.'),
       amount,
       memo: String(d.memo || '').trim(),
     };
@@ -614,13 +694,16 @@ export const purchases = {
       row = { id: nextId(db, 'purchases'), companyId: user.companyId, ...fields, createdBy: user.id, createdAt: nowIso() };
       db.purchases.push(row);
     }
-    if (can(user, 'stock.manage')) linkPurchaseStock(db, user, row, d);
+    // 재고 입고 연결은 매입만 (매출로 바꾸면 연결된 입고도 지움)
+    if (can(user, 'stock.manage') && hasFeature(companyOf(db, user), 'stocks')) linkPurchaseStock(db, user, row, kind === '매입' ? d : {});
+    else if (kind === '매출' && row.stockItemId) linkPurchaseStock(db, user, row, {});
     saveDb(db);
     return clone(row);
   },
 
   async remove(id) {
     const { db, user } = await authorize('purchase.manage');
+    requireFeature(db, user, 'purchases');
     const row = findPurchase(db, user, id);
     if (row.stockItemId) unlinkPurchaseStock(db, user, row);
     db.purchases = db.purchases.filter((r) => r !== row);
@@ -631,7 +714,7 @@ export const purchases = {
 // ============================================================
 // 재고 (통계정보 > 재고체크): 페인트·자재 품목별 입고 / 사용 / 실사(실제 남은 수량 확인)
 //   품목 한 줄에 입출고 기록(moves)을 함께 저장. 현재고 = 기록을 날짜순으로 계산
-//   (입고 +, 사용 −, 실사 = 그 수량으로 맞춤)
+//   (입고 +, 사용 −, 실사 = 그 수량으로 맞춤)  /  stock.manage 권한 + 업체 기능 stocks (운영자가 켬)
 // ============================================================
 export const STOCK_MOVE_TYPES = ['입고', '사용', '실사'];
 
@@ -680,6 +763,7 @@ function linkPurchaseStock(db, user, purchase, d) {
 export const stocks = {
   async list({ includeInactive = false } = {}) {
     const { db, user } = await authorize('stock.manage');
+    requireFeature(db, user, 'stocks');
     return clone(
       db.stocks
         .filter((r) => r.companyId === user.companyId && (includeInactive || r.active !== false))
@@ -690,9 +774,10 @@ export const stocks = {
 
   async saveItem(d = {}) {
     const { db, user } = await authorize('stock.manage');
+    requireFeature(db, user, 'stocks');
     const fields = {
       name: required(d.name, '품목 이름을 입력해 주세요.'),
-      category: PURCHASE_CATEGORIES.includes(d.category) ? d.category : '공통',
+      category: purchaseCategories(companyOf(db, user)).includes(d.category) ? d.category : '공통',
       spec: String(d.spec || '').trim(), // 색상·규격 (예: 화이트 18L)
       unit: String(d.unit || '').trim() || '개',
       minQty: qtyOf(d.minQty || 0, '부족 알림 수량을 확인해 주세요.'), // 이 수량 이하면 '부족' 표시
@@ -719,6 +804,7 @@ export const stocks = {
   // 입출고 기록이 있는 품목은 기록 보존을 위해 삭제 대신 '사용 안 함'
   async removeItem(id) {
     const { db, user } = await authorize('stock.manage');
+    requireFeature(db, user, 'stocks');
     const item = findStock(db, user, id);
     if (item.moves.length) item.active = false;
     else db.stocks = db.stocks.filter((r) => r !== item);
@@ -727,6 +813,7 @@ export const stocks = {
 
   async addMove(itemId, d = {}) {
     const { db, user } = await authorize('stock.manage');
+    requireFeature(db, user, 'stocks');
     const item = findStock(db, user, itemId);
     const date = String(d.date || '').trim();
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new ApiError('날짜를 입력해 주세요.');
@@ -742,6 +829,7 @@ export const stocks = {
   // 매입에서 자동으로 들어간 입고는 매입관리에서 고치거나 지움
   async removeMove(itemId, moveId) {
     const { db, user } = await authorize('stock.manage');
+    requireFeature(db, user, 'stocks');
     const item = findStock(db, user, itemId);
     const move = item.moves.find((m) => m.id === Number(moveId));
     if (!move) throw new ApiError('기록을 찾을 수 없습니다.', 'NOT_FOUND');
@@ -750,6 +838,65 @@ export const stocks = {
     item.updatedAt = nowIso();
     saveDb(db);
     return clone(presentStock(item));
+  },
+};
+
+// ============================================================
+// 상담내역 (상단 [상담내역]): 전화번호별 통화 메모 — 계약 전 문의 전화도 적어 두고 번호로 찾기
+//   조회·작성·수정·삭제 모두 calllog.manage 권한 (관리자는 항상)
+//   검색: 숫자는 전화번호 어느 자리든 (가운데 4자리·뒷자리), 글자는 이름·메모에서
+// ============================================================
+function findCallLog(db, user, id) {
+  const row = db.callLogs.find((r) => r.id === Number(id) && r.companyId === user.companyId);
+  if (!row) throw new ApiError('상담내역을 찾을 수 없습니다.', 'NOT_FOUND');
+  return row;
+}
+
+export const callLogs = {
+  async list({ q = '' } = {}) {
+    const { db, user } = await authorize('calllog.manage');
+    requireFeature(db, user, 'callLog');
+    const text = String(q || '').trim();
+    const digits = digitsOnly(text);
+    const words = text.replace(/[\d\s-]+/g, ' ').trim().toLowerCase();
+    const names = new Map(db.users.filter((u) => u.companyId === user.companyId).map((u) => [u.id, u.name]));
+    return db.callLogs
+      .filter((r) => r.companyId === user.companyId)
+      .filter((r) => !digits || digitsOnly(r.phone).includes(digits))
+      .filter((r) => !words || `${r.name || ''} ${r.memo || ''}`.toLowerCase().includes(words))
+      .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)) || b.id - a.id) // 최근 것부터
+      .slice(0, 500)
+      .map((r) => ({ ...clone(r), writerName: names.get(r.createdBy) || '' }));
+  },
+
+  async save(d = {}) {
+    const { db, user } = await authorize('calllog.manage');
+    requireFeature(db, user, 'callLog');
+    const phone = formatPhone(d.phone || '');
+    if (digitsOnly(phone).length < 9) throw new ApiError('전화번호를 끝까지 입력해 주세요.');
+    const fields = {
+      phone,
+      name: String(d.name || '').trim().slice(0, 50),
+      memo: required(String(d.memo || '').slice(0, 3000), '통화 내용(메모)을 입력해 주세요.'),
+    };
+    let row;
+    if (d.id) {
+      row = findCallLog(db, user, d.id);
+      Object.assign(row, fields, { updatedAt: nowIso(), updatedBy: user.id });
+    } else {
+      row = { id: nextId(db, 'callLogs'), companyId: user.companyId, ...fields, createdBy: user.id, createdAt: nowIso() };
+      db.callLogs.push(row);
+    }
+    saveDb(db);
+    return clone(row);
+  },
+
+  async remove(id) {
+    const { db, user } = await authorize('calllog.manage');
+    requireFeature(db, user, 'callLog');
+    const row = findCallLog(db, user, id);
+    db.callLogs = db.callLogs.filter((r) => r !== row);
+    saveDb(db);
   },
 };
 

@@ -4,7 +4,7 @@ import { calcAmounts, itemsSummary, kindBreakdown, timeLabel } from '../utils/co
 import { formatAddress, won } from '../utils/format.js';
 import { ESIGN_STATUS } from '../constants.js';
 
-const CIRCLED = ['①', '②', '③'];
+const CIRCLED = ['①', '②', '③', '④'];
 
 // AS 최근 회차 (AS관리 목록 표시)
 const asLast = (c) => c.asLogs?.at(-1) || c.asInfo || null;
@@ -164,6 +164,12 @@ function FullTable({ contracts, selectedIds, onToggle, onToggleAll, showAmount, 
                     <div className="as-request">
                       🔧 AS{item.asLogs?.length > 1 ? ` ${item.asLogs.length}회` : ''} {asLast(item).date} · {asLast(item).request}{asLast(item).photoCount > 0 && ` 📷${asLast(item).photoCount}`}
                       {asLast(item).doneAt && <b> (완료)</b>}
+                      {!asLast(item).doneAt && asLast(item).engineerName && (
+                        <div className="sub-text">
+                          담당 {asLast(item).engineerName} · {asLast(item).visitDate ? `방문 ${asLast(item).visitDate}${asLast(item).visitTime ? ` ${asLast(item).visitTime}` : ''}` : <span className="text-red">방문일 미정</span>}
+                          {asLast(item).mobileStatus && ` · 기사 보고: ${asLast(item).mobileStatus}`}
+                        </div>
+                      )}
                     </div>
                   )}
                   {itemsSummary(item) && <div className="sub-text ellipsis">{itemsSummary(item)}</div>}

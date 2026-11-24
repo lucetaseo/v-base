@@ -8,11 +8,12 @@ import ContractEditor from './ContractEditor.jsx';
 import ContractDetail from './ContractDetail.jsx';
 import ContractViewModal from '../components/ContractViewModal.jsx';
 import KakaoModal from '../components/KakaoModal.jsx';
-import AsModal from '../components/AsModal.jsx';
+import AsModal, { sendAs } from '../components/AsModal.jsx';
 import Pagination from '../components/Pagination.jsx';
 import { calcAmounts, itemsSummary, summarize, timeLabel } from '../utils/contract.js';
 import { formatAddress, won } from '../utils/format.js';
 import { downloadExcel } from '../utils/excel.js';
+import { currentHasFeature } from '../constants.js';
 import { goBack, match, navigate, navigateForward } from '../router.js';
 
 const PAGE_SIZE = 20;
@@ -77,11 +78,13 @@ export default function ContractPage({ route }) {
         onEdit={(c) => navigateForward(`/contracts/${c.id}/edit`)}
         onNewWork={(c, category) => navigateForward(`/contracts/new?from=${c.id}${category ? `&category=${encodeURIComponent(category)}` : ''}`)}
         onOpenGroup={(id) => navigateForward(`/contracts/${id}`)}
+        engineers={engineers}
       />
     );
   }
   const mode = path === '/contracts/trash' ? 'trash' : path === '/contracts/as' ? 'as' : 'main';
   if (mode === 'trash' && !can('contract.delete')) return <NoPermission />;
+  if (mode === 'as' && !currentHasFeature('as')) return <NoPermission />;
   return <ContractList key={mode} mode={mode} engineers={engineers} />;
 }
 
@@ -277,7 +280,7 @@ function ContractList({ mode = 'main', engineers }) {
             수정
           </button>
         )}
-        {(
+        {currentHasFeature('alimtalk') && (
           <button type="button" className="btn-kakao-talk sm" onClick={() => setKakaoTarget(item)}>
             알림톡
           </button>
@@ -363,7 +366,7 @@ function ContractList({ mode = 'main', engineers }) {
       {(can('contract.delete') || can('contract.edit')) && (
         <div className="bulk-bar">
           <span className="sub-text">선택 {selectedIds.size}건</span>
-          {!trash && can('contract.edit') && (
+          {!trash && can('contract.edit') && currentHasFeature('as') && (
             <button
               type="button"
               className="btn-outline-action"
@@ -411,9 +414,12 @@ function ContractList({ mode = 'main', engineers }) {
       {asOpen && (
         <AsModal
           title={`선택한 ${selectedIds.size}건`}
+          engineers={engineers}
+          bulk={selectedIds.size > 1}
+          defaultEngineerId={selectedIds.size === 1 ? (() => { const c = rows.find((x) => selectedIds.has(x.id)); return c?.schedules?.[0]?.assignType !== 'team' ? c?.schedules?.[0]?.engineerId : undefined; })() : undefined}
           onClose={() => setAsOpen(false)}
           onSave={async (info) => {
-            await contractApi.setAs([...selectedIds], true, info);
+            await sendAs(contractApi, [...selectedIds], info);
             setAsOpen(false);
             setSelectedIds(new Set());
             await load();

@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { stocks } from '../api/index.js';
 import { useAuth } from '../auth/AuthContext.jsx';
-import { PURCHASE_CATEGORIES } from '../constants.js';
+import { currentPurchaseCategories } from '../constants.js';
 import { today } from '../utils/date.js';
 import { downloadExcel } from '../utils/excel.js';
 
@@ -205,7 +205,7 @@ export default function StockPage() {
         <label>
           <span>구분</span>
           <select className="input-select" value={item.category} onChange={(e) => setItem({ ...item, category: e.target.value })}>
-            {PURCHASE_CATEGORIES.map((c) => (
+            {currentPurchaseCategories().map((c) => (
               <option key={c} value={c}>{c}</option>
             ))}
           </select>
@@ -249,7 +249,7 @@ export default function StockPage() {
         <input className="input-text" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="품목·규격 검색" style={{ maxWidth: 200 }} />
         <select className="input-select" value={cat} onChange={(e) => setCat(e.target.value)}>
           <option value="">전체 구분</option>
-          {PURCHASE_CATEGORIES.map((c) => (
+          {currentPurchaseCategories().map((c) => (
             <option key={c} value={c}>{c}</option>
           ))}
         </select>

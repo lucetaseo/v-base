@@ -4,7 +4,7 @@ import { apartments, imports } from '../../api/index.js';
 import { useAuth } from '../../auth/AuthContext.jsx';
 import { categoriesFromName, legacyKeys, mapLegacyRow, parseLegacyHtml } from '../../utils/legacyImport.js';
 import { won } from '../../utils/format.js';
-import { CATEGORIES } from '../../constants.js';
+import { currentCategories } from '../../constants.js';
 import { TEMPLATES, mapSheetContractRow, readSheetRows, templateUrl } from '../../utils/importTemplates.js';
 import { parseProductText } from '../../utils/productImport.js';
 import { normalizeSido, parseApartmentText } from '../../utils/apartmentImport.js';
@@ -22,7 +22,7 @@ async function sendWithRetry(rows, options = {}, tries = 3) {
   try {
     return await imports.contracts(rows, options);
   } catch (err) {
-    const retryable = err.code === 'SERVER' || err.code === 'NETWORK';
+    const retryable = err.code === 'SERVER' || err.code === 'BUSY' || err.code === 'NETWORK';
     if (!retryable || tries <= 1) throw err;
     await new Promise((r) => setTimeout(r, 1500));
     if (rows.length > 5) {
@@ -114,7 +114,7 @@ function EngineerImport() {
       const list = data
         .map((r) => {
           const name = get(r, '이름', '기사명', 'name');
-          const listed = get(r, '담당시공').split(/[,·/\s]+/).filter((c) => CATEGORIES.includes(c));
+          const listed = get(r, '담당시공').split(/[,·/\s]+/).filter((c) => currentCategories().includes(c));
           return { name, loginId: get(r, '아이디', 'ID', 'id', 'loginId'), phone: get(r, '연락처', '핸드폰', '전화번호', 'phone'), categories: listed.length ? listed : categoriesFromName(name) };
         })
         .filter((r) => r.name);
