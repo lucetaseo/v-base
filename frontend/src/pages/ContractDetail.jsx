@@ -233,7 +233,7 @@ export default function ContractDetail({ contractId, initialTab, focus, onBack, 
       <h3 className="form-section-title">&gt; 시공 사진 — {selected.category}</h3>
       {(selected.schedules || [])
         .map((s, i) => ({ s, i }))
-        .filter(({ s, i }) => i === 0 || s.date || s.photoCount)
+        .filter(({ s, i }) => i === 0 || s.date || s.photoCount || s.photosArchived)
         .map(({ s, i }) => (
           <StepPhotos
             key={`${selected.id}-${i}`}
@@ -241,6 +241,7 @@ export default function ContractDetail({ contractId, initialTab, focus, onBack, 
             stepIndex={i}
             label={`${CIRCLED[i]} ${i + 1}차${s.date ? ` (${s.date})` : ''}`}
             count={s.photoCount || 0}
+            archived={s.photosArchived || null}
             canUpload={canDo('contract.edit', selected)}
             canDelete={() => canDo('contract.edit', selected)}
             onError={handleError}

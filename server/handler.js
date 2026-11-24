@@ -90,6 +90,7 @@ const SERVICES = {
   imports: services.imports,
   customerApp: services.customerApp,
   companyFiles: services.companyFiles,
+  photoArchive: services.photoArchive,
 };
 const BLOCKED = new Set(['auth.resetDemoData']);
 
@@ -137,6 +138,8 @@ const READ_ONLY = new Set([
   'engineerApp.paperPhotos',
   'engineerApp.myAs',
   'companyFiles.list',
+  'photoArchive.summary',
+  'photoArchive.photos',
   'engineerApp.colleagues',
   'engineerApp.asPhotos',
   'engineerApp.stepPhotos',
@@ -162,6 +165,7 @@ const LIGHT_TABLES = {
   'users.staffOptions': [],
   'engineers.list': [],
   'teams.list': ['teams'],
+  'teams.addLightingTeams': ['teams'],
   'products.list': ['products'],
   'imports.products': ['products'],
   'callLogs.list': ['callLogs'],
@@ -197,10 +201,10 @@ const LIGHT_TABLES = {
 };
 
 // 입금 영수증 사진을 읽거나 바꾸는 요청 (첫 인자 = 계약 번호)
-const RECEIPT_CALLS = new Set(['contracts.receipt', 'contracts.addPayment', 'contracts.updatePayment', 'contracts.removePayment', 'contracts.update', 'contracts.paymentPhotos', 'contracts.paperPhotos', 'contracts.setPaperPhotos', 'contracts.asPhotos', 'contracts.setAs', 'contracts.addAsPhotos', 'contracts.stepPhotos', 'contracts.addStepPhotos', 'contracts.removeStepPhoto', 'engineerApp.paperPhotos', 'engineerApp.asPhotos', 'engineerApp.stepPhotos', 'engineerApp.addStepPhotos', 'engineerApp.removeStepPhoto']);
+const RECEIPT_CALLS = new Set(['contracts.receipt', 'contracts.addPayment', 'contracts.updatePayment', 'contracts.removePayment', 'contracts.update', 'contracts.paymentPhotos', 'contracts.paperPhotos', 'contracts.setPaperPhotos', 'contracts.asPhotos', 'contracts.setAs', 'contracts.addAsPhotos', 'contracts.stepPhotos', 'contracts.addStepPhotos', 'contracts.removeStepPhoto', 'engineerApp.paperPhotos', 'engineerApp.asPhotos', 'engineerApp.stepPhotos', 'engineerApp.addStepPhotos', 'engineerApp.removeStepPhoto', 'photoArchive.photos', 'photoArchive.purge']);
 
 // 계약 목록·통계: 저장하지 않는 요청이라 계약의 긴 글·변경이력 없이 읽어도 됨
-const SLIM_CALLS = new Set(['contracts.list', 'contracts.listCached', 'reports.contracts', 'reports.engineers', 'engineerApp.myAs']);
+const SLIM_CALLS = new Set(['contracts.list', 'contracts.listCached', 'reports.contracts', 'reports.engineers', 'engineerApp.myAs', 'photoArchive.summary']);
 
 // 계약 하나(또는 고른 몇 건)를 보거나 고치는 요청: 그 계약만 전체로 읽고 나머지 계약은 긴 글·변경이력 없이 (트래픽·속도)
 //   다른 계약까지 고치게 되면 자동으로 전체를 다시 읽어 처음부터 처리 (touchedSlim) — 결과는 예전과 같음

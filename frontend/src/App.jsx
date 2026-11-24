@@ -30,6 +30,7 @@ import ImportPage from './pages/settings/ImportPage.jsx';
 import AlimtalkSettings from './pages/settings/AlimtalkSettings.jsx';
 import ContractTermsSettings from './pages/settings/ContractTermsSettings.jsx';
 import AuditLogPage from './pages/settings/AuditLogPage.jsx';
+import PhotoArchivePage from './pages/settings/PhotoArchivePage.jsx';
 import CompanyFilesPage from './pages/settings/CompanyFilesPage.jsx';
 import { EngineerSettings, TeamSettings, ProductSettings, ApartmentSettings, ScheduleSettings } from './pages/settings/MasterSettings.jsx';
 
@@ -82,6 +83,7 @@ const MENUS = [
       { key: 'scheduleSetting', label: '일정관리설정', path: '/settings/schedule', perm: 'settings.manage' },
       { key: 'import', label: '데이터 가져오기', path: '/settings/import', visible: (u) => u.role === ROLES.ADMIN },
       { key: 'files', label: '회사 자료 백업', path: '/settings/files', feature: 'companyFiles', visible: (u) => u.role === ROLES.ADMIN || u.role === ROLES.MANAGER },
+      { key: 'photoArchive', label: '시공 사진 정리', path: '/settings/photos', feature: 'photoArchive', visible: (u) => u.role === ROLES.ADMIN },
       { key: 'logs', label: '수정로그', path: '/settings/logs', visible: (u) => u.role === ROLES.ADMIN },
       { key: 'me', label: '내 정보', path: '/me' },
     ],
@@ -102,6 +104,7 @@ const SETTING_PAGES = {
   scheduleSetting: ScheduleSettings,
   import: ImportPage,
   files: CompanyFilesPage,
+  photoArchive: PhotoArchivePage,
   logs: AuditLogPage,
   me: SettingsPage,
 };

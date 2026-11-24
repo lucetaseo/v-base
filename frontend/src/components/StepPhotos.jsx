@@ -7,9 +7,10 @@ import { compressImage } from '../utils/image.js';
 //   api: { list(stepIndex), add(stepIndex, photos), remove(photoId) } — 사무실은 contracts, 기사는 engineerApp
 //   count: 지금 사진 장수 (사진은 [사진 보기]·올린 뒤에만 불러옴 — 목록이 무거워지지 않게)
 //   canUpload: 올리기 버튼, canDelete(photo): 그 사진을 지울 수 있는지
+//   archived: 설정 > 시공 사진 정리로 내려받아 서버에서 지운 기록 { at, count }
 const PER_SEND = 5; // 서버가 한 번에 받는 장수 (stepPhotos.js STEP_PHOTOS_PER_SEND)
 
-export default function StepPhotos({ api, stepIndex, label, count = 0, canUpload = false, canDelete = () => false, onCount, onError }) {
+export default function StepPhotos({ api, stepIndex, label, count = 0, archived = null, canUpload = false, canDelete = () => false, onCount, onError }) {
   const [photos, setPhotos] = useState(null); // null: 아직 안 불러옴
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState('');
@@ -72,6 +73,11 @@ export default function StepPhotos({ api, stepIndex, label, count = 0, canUpload
       <div className="step-photos-head">
         <strong>📷 {label} 시공 사진</strong>
         <span className="sub-text">{n}장</span>
+        {archived?.count > 0 && (
+          <span className="sub-text archived-note">
+            (사진 {archived.count}장은 {String(archived.at || '').slice(0, 10)}에 내려받아 정리됨)
+          </span>
+        )}
         {n > 0 && (
           <button type="button" className="btn-link" onClick={toggle}>
             {open ? '접기' : '사진 보기'}
