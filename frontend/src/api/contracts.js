@@ -3,7 +3,7 @@
 //   GET/POST/PATCH/DELETE /api/contracts ...
 // ============================================================
 
-import { loadDb, saveDb, nextId, publicBaseUrl, clientInfo, getSession, setSession, alimtalkGateway, hashPassword } from './runtime.js';
+import { loadDb, saveDb, nextId, publicBaseUrl, clientInfo, getSession, setSession, alimtalkGateway, hashPassword, ocrGateway } from './runtime.js';
 import { ApiError, authorize, authorizeAny, clone, companyOf, findContract, findReadableContract, ownsContract, readableContracts, requireFeature, isLoginIdTaken, nowIso, validatePassword, visibleContracts } from './core.js';
 import { addHistory, assigneeOf, contractListView, contractView, hideAmounts } from './views.js';
 import { addStepPhotos, listStepPhotos, removeStepPhoto, updateStepPhoto } from './stepPhotos.js';
@@ -1005,6 +1005,48 @@ export const contracts = {
   },
 
   // 실물 계약서 사진 보기
+  // 계약서 스캔(OCR, 기능 contractScan): 연결 여부 — 서버에 ANTHROPIC_API_KEY 가 있어야 함 (브라우저 데모는 안 됨)
+  async scanStatus() {
+    const { db, user } = await authorize('contract.create');
+    requireFeature(db, user, 'contractScan');
+    return { configured: !!ocrGateway()?.configured() };
+  },
+
+  // 종이 계약서 사진 → 계약 등록 칸에 넣을 값 (저장하지 않음 — 화면에서 확인·고친 뒤 넣고 평소처럼 저장)
+  async scanPaper(image) {
+    const { db, user } = await authorize('contract.create');
+    requireFeature(db, user, 'contractScan');
+    const gw = ocrGateway();
+    if (!gw?.configured()) throw new ApiError('계약서 스캔이 아직 연결되지 않았습니다. 운영자에게 문의해 주세요.');
+    if (!/^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(String(image || ''))) throw new ApiError('계약서 사진(jpg, png)을 올려 주세요.');
+    if (image.length > 5 * 1024 * 1024) throw new ApiError('사진이 너무 큽니다.');
+    let r;
+    try {
+      r = await gw.readContract(image);
+    } catch (e) {
+      // AI 쪽 오류(키·한도·시간 초과 등)는 숫자 상태값이 있음 → 쉬운 말로
+      throw new ApiError(e?.status || e?.name === 'APIConnectionTimeoutError' ? '계약서를 읽는 중 AI 연결에 문제가 생겼습니다. 잠시 후 다시 시도해 주세요.' : e.message);
+    }
+    const str = (v, n) => String(v ?? '').trim().slice(0, n);
+    const amt = (v) => Math.max(0, Math.round(Number(v) || 0));
+    const date = (v) => (/^\d{4}-\d{2}-\d{2}$/.test(String(v || '')) ? v : '');
+    return {
+      customerName: str(r.customerName, 30),
+      customerPhone: formatPhone(str(r.customerPhone, 20)),
+      customerPhone2: formatPhone(str(r.customerPhone2, 20)),
+      aptName: str(r.address, 100),
+      dong: str(r.dong, 10),
+      ho: str(r.ho, 10),
+      contractDate: date(r.contractDate),
+      moveInDate: date(r.moveInDate),
+      lineItems: (Array.isArray(r.lineItems) ? r.lineItems : []).slice(0, 50).map((l) => ({ name: str(l.name, 100), qty: Math.max(1, Math.round(Number(l.qty) || 1)), unitPrice: amt(l.unitPrice) })).filter((l) => l.name),
+      totalAmount: amt(r.totalAmount),
+      discount: amt(r.discount),
+      memo: str(r.memo, 500),
+      uncertain: (Array.isArray(r.uncertain) ? r.uncertain : []).map((k) => (k === 'address' ? 'aptName' : String(k))).slice(0, 20),
+    };
+  },
+
   async paperPhotos(id) {
     const { db, user } = await authorize('contract.view');
     const c = findReadableContract(db, user, id);

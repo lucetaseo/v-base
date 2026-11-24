@@ -6630,3 +6630,127 @@ a.import-no:hover {
 .dwg-colors button.on {
   box-shadow: 0 0 0 2px #111827;
 }
+
+/* 계약서 스캔 (AI) */
+.scan-box {
+  margin: 6px 0 10px;
+  padding: 10px;
+  border: 1px dashed #93c5fd;
+  border-radius: 6px;
+  background: #f8fbff;
+}
+.scan-result {
+  margin-top: 10px;
+}
+.scan-cols {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-start;
+}
+.scan-photo {
+  width: 320px;
+  max-width: 100%;
+  border: 1px solid #e5e7eb;
+  border-radius: 4px;
+}
+.scan-fields {
+  flex: 1 1 360px;
+  display: grid;
+  gap: 6px;
+}
+.scan-field {
+  display: grid;
+  grid-template-columns: 110px 1fr;
+  gap: 8px;
+  align-items: center;
+}
+.scan-field.unsure .input-text {
+  background: #fef9c3;
+  border-color: #eab308;
+}
+.scan-check {
+  color: #b45309;
+  font-size: 12px;
+}
+.scan-num {
+  width: 90px;
+}
+
+/* 거래명세서 */
+.stmt-opts {
+  margin: 8px 0;
+}
+.stmt {
+  color: #111;
+  font-size: 13px;
+}
+.stmt-title {
+  margin: 4px 0 8px;
+  text-align: center;
+  font-size: 26px;
+  letter-spacing: 6px;
+}
+.stmt-meta {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+.stmt-parties {
+  display: grid;
+  grid-template-columns: 1fr 1.3fr;
+  gap: 8px;
+}
+.stmt table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.stmt th,
+.stmt td {
+  border: 1px solid #555;
+  padding: 4px 6px;
+  text-align: left;
+  vertical-align: middle;
+}
+.stmt th {
+  background: #f3f4f6;
+  white-space: nowrap;
+  font-weight: 600;
+}
+.stmt .stmt-side {
+  width: 22px;
+  writing-mode: vertical-rl;
+  text-align: center;
+  letter-spacing: 4px;
+}
+.stmt-total {
+  margin: 10px 0;
+  padding: 8px;
+  border: 2px solid #111;
+  font-size: 15px;
+}
+.stmt-items td.r {
+  text-align: right;
+  white-space: nowrap;
+}
+.stmt-items td.c {
+  text-align: center;
+}
+.stmt-items thead th,
+.stmt-items tfoot th {
+  text-align: center;
+}
+.stmt-spec {
+  white-space: pre-wrap;
+  font-size: 12px;
+  color: #374151;
+}
+.stmt-foot {
+  margin-top: 12px;
+  text-align: right;
+}
+@media (max-width: 640px) {
+  .stmt-parties {
+    grid-template-columns: 1fr;
+  }
+}

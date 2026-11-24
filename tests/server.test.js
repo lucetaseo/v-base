@@ -25,6 +25,7 @@ process.env.INIT_SUPER_LOGIN = 'super';
 process.env.INIT_SUPER_PASSWORD = 'super-test-1234';
 process.env.INIT_DEMO_DATA = 'true';
 process.env.FILE_STORE_FAKE = '1'; // 회사 자료: 파일 저장소 대신 가짜 주소
+process.env.OCR_FAKE = '1'; // 계약서 스캔: AI 대신 정해진 가짜 값
 process.env.VB_VERIFY_FAST = '1'; // 빠른 불러오기: 매 요청마다 전체로 읽은 결과와 같은지 비교 (다르면 실패)
 
 const { handleRpc } = await import('../server/handler.js');
@@ -2672,4 +2673,44 @@ test('고객 도면 보기 (customerDrawings): 제품 사양·사진 → 고객�
   // 상품을 지우면 사진도 함께
   await admin.ok('products', 'setPhoto', prod.id, photo);
   await admin.ok('products', 'remove', prod.id);
+});
+
+test('계약서 스캔 (contractScan): 기본 꺼짐, 켜면 사진 → 칸 값(저장 안 함), 키 없으면 연결 안 됨, 권한', async () => {
+  const admin = client();
+  await admin.ok('auth', 'login', 'admin', 'admin1234');
+  assert.equal((await admin('contracts', 'scanStatus')).status, 403, '기본 꺼짐');
+  const sup = client();
+  await sup.ok('auth', 'login', 'super', 'super-test-1234');
+  const good = (await sup.ok('companies', 'list')).find((x) => x.code === 'thegood');
+  await sup.ok('companies', 'update', good.id, { features: { contractScan: true } });
+  try {
+    assert.deepEqual(await admin.ok('contracts', 'scanStatus'), { configured: true });
+    assert.equal((await admin('contracts', 'scanPaper', 'data:text/plain;base64,AAAA')).status, 400, '그림만');
+    const before = (await admin.ok('contracts', 'list', {})).length;
+    const img = 'data:image/jpeg;base64,' + Buffer.from('paper').toString('base64');
+    const r = await admin.ok('contracts', 'scanPaper', img);
+    assert.equal(r.customerName, '스캔고객');
+    assert.equal(r.aptName, '래미안 아파트', '주소 → 아파트 칸');
+    assert.deepEqual([r.dong, r.ho, r.contractDate], ['101', '1203', '2026-11-20']);
+    assert.deepEqual(r.lineItems, [{ name: '다운라이트 3인치', qty: 12, unitPrice: 25000 }]);
+    assert.deepEqual(r.uncertain, ['customerPhone']);
+    assert.equal((await admin.ok('contracts', 'list', {})).length, before, '저장하지 않음');
+    // 기사는 계약 등록 권한 없음
+    const eng = client();
+    await eng.ok('auth', 'login', 'gong', 'gong1234', '', 'engineer');
+    assert.notEqual((await eng('contracts', 'scanPaper', img)).status, 200);
+    // 서버에 키가 없으면 연결 안 됨
+    delete process.env.OCR_FAKE;
+    const key = process.env.ANTHROPIC_API_KEY;
+    delete process.env.ANTHROPIC_API_KEY;
+    try {
+      assert.deepEqual(await admin.ok('contracts', 'scanStatus'), { configured: false });
+      assert.equal((await admin('contracts', 'scanPaper', img)).status, 400);
+    } finally {
+      process.env.OCR_FAKE = '1';
+      if (key) process.env.ANTHROPIC_API_KEY = key;
+    }
+  } finally {
+    await sup.ok('companies', 'update', good.id, { features: {} });
+  }
 });

@@ -25,14 +25,17 @@
 서버 `server/`
 - `handler.js` 요청 처리(호출 목록 `SERVICES`·`READ_ONLY`·`LIGHT_TABLES`·`FOCUS_CALLS`, 잠금·BUSY)
 - `pg.js` DB 읽기/쓰기(`loadSnapshot`·`persistChanges`) / `photoStore.js` 사진 저장소 / `page.js` 업체 주소별 첫 화면·앱 정보(manifest·아이콘)
-- `session.js` 쿠키 / `health.js` `/api/rpc` 점검 / `bizgo.js` 알림톡 발송
+- `session.js` 쿠키 / `health.js` `/api/rpc` 점검 / `bizgo.js` 알림톡 발송 / `ocr.js` 계약서 스캔(Claude, `ANTHROPIC_API_KEY`)
 
 화면 `frontend/src/`
 - `App.jsx` 메뉴·주소 연결 / `pages/ContractPage.jsx` 계약 목록 / `ContractDetail.jsx` 계약 상세 / `ContractEditor.jsx` 계약 등록·수정
 - `pages/StatsPage.jsx` 통계(매출·매입·차액) / `PurchasePage.jsx` 매입관리 / `StockPage.jsx` 재고체크 (통계정보 하위, 기능 `purchases`·`stocks`)
 - `pages/EngineerApp.jsx` 기사모바일 / `ConsultHome.jsx` 상담실장 / `CustomerApp.jsx` 고객확인 / `SignPage.jsx` 서명 / `AccountManagement.jsx` 운영자 업체·계정
 - `pages/settings/` 설정 화면들(가져오기·회사 자료 백업·알림톡·계약조건·수정로그·기사/팀/상품/아파트) / `components/ScheduleManagement.jsx` 일정 달력
+- `components/DrawingEditor.jsx` 시공 도면 편집 / `ContractScan.jsx` 계약서 스캔 / `StatementModal.jsx` 거래명세서
 - `components/InstallCard.jsx` + `utils/install.js` 앱 설치 / `auth/AuthContext.jsx` 로그인 상태
+
+아르떼 진행 상황·받을 자료 `docs/ARTE.md`
 
 시험 `tests/server.test.js`(서버 시험, `VB_VERIFY_FAST=1` 로 빠른 불러오기 비교) · `tests/load/run.mjs`(부하 시험)
 

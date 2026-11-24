@@ -13,6 +13,7 @@ import PaymentModal from '../components/PaymentModal.jsx';
 import DiscountModal from '../components/DiscountModal.jsx';
 import { backdrop } from '../utils/backdrop.js';
 import ContractViewModal from '../components/ContractViewModal.jsx';
+import StatementModal from '../components/StatementModal.jsx';
 import { PAPER_MAX } from '../components/PaperPhotos.jsx';
 import PhotoViewer from '../components/PhotoViewer.jsx';
 import StepPhotos from '../components/StepPhotos.jsx';
@@ -58,6 +59,7 @@ export default function ContractDetail({ contractId, initialTab, focus, onBack, 
   const [receiptView, setReceiptView] = useState(null); // { images: [{id, image}], title }
   const [kakao, setKakao] = useState(null); // { contract, template, brand }
   const [viewId, setViewId] = useState(null);
+  const [statementOf, setStatementOf] = useState(null); // 거래명세서 (기능 statement)
   const [asPhotos, setAsPhotos] = useState(null); // AS 사진 크게 보기 { images, title }
   const openAsPhotos = async (id, index) => {
     try {
@@ -510,6 +512,9 @@ export default function ContractDetail({ contractId, initialTab, focus, onBack, 
                       <button type="button" className="btn-dark-action" onClick={() => removeWork(c)}>삭제</button>
                     )}
                     <button type="button" className="btn-outline-action" onClick={() => setViewId(c.id)}>계약서</button>
+                    {currentHasFeature('statement') && can('contract.amount') && !c.readOnly && (
+                      <button type="button" className="btn-outline-action" onClick={() => setStatementOf(c)}>거래명세서</button>
+                    )}
                   </div>
                 </td>
               </tr>
@@ -976,6 +981,7 @@ export default function ContractDetail({ contractId, initialTab, focus, onBack, 
         />
       )}
       {asPhotos && <PhotoViewer images={asPhotos.images} title={asPhotos.title} onClose={() => setAsPhotos(null)} />}
+      {statementOf && <StatementModal contract={statementOf} company={company} onClose={() => setStatementOf(null)} />}
       {viewId && <ContractViewModal contractId={viewId} onClose={() => setViewId(null)} onChanged={load} />}
     </div>
   );
