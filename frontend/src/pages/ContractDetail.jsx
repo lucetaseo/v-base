@@ -14,6 +14,7 @@ import DiscountModal from '../components/DiscountModal.jsx';
 import { backdrop } from '../utils/backdrop.js';
 import ContractViewModal from '../components/ContractViewModal.jsx';
 import StatementModal from '../components/StatementModal.jsx';
+import CustomerDocsPanel from '../components/CustomerDocsPanel.jsx';
 import { PLAN_ACCEPT } from '../utils/planFile.js';
 import { PAPER_MAX } from '../components/PaperPhotos.jsx';
 import PhotoViewer from '../components/PhotoViewer.jsx';
@@ -64,6 +65,7 @@ export default function ContractDetail({ contractId, initialTab, focus, onBack, 
   // 탭 줄 [도면 추가]: 고른 파일을 [계약정보] 탭의 도면 편집에 넘김
   const drawingRef = useRef(null);
   const [pendingDrawing, setPendingDrawing] = useState(null);
+  const [dwgList, setDwgList] = useState(null); // 도면 편집이 마지막으로 불러온 목록 { id: 계약, list } (확정 수)
   const pickDrawingFile = (e) => {
     const file = e.target.files?.[0];
     e.target.value = '';
@@ -307,7 +309,10 @@ export default function ContractDetail({ contractId, initialTab, focus, onBack, 
           list: () => contractApi.drawings(selected.id),
           save: (d) => contractApi.saveDrawing(selected.id, d),
           remove: (drawingId) => contractApi.removeDrawing(selected.id, drawingId),
+          confirm: (drawingId, on) => contractApi.confirmDrawing(selected.id, drawingId, on),
         }}
+        confirmable={currentHasFeature('drawingConfirm')}
+        onListChange={(l) => setDwgList({ id: selected.id, list: l })}
         lines={selected.lineItems || []}
         canEdit={canDo('contract.edit', selected) && !selected.deletedAt}
         onError={handleError}
@@ -828,6 +833,9 @@ export default function ContractDetail({ contractId, initialTab, focus, onBack, 
             </div>
           )}
           {drawingSection}
+          {selected && currentHasFeature('customerDocs') && (
+            <CustomerDocsPanel key={`docs-${selected.id}`} contract={selected} drawings={dwgList?.id === selected.id ? dwgList.list : selected.drawings || []} canEdit={canDo('contract.edit', selected) && !selected.deletedAt} onError={handleError} />
+          )}
           <h3 className="form-section-title">&gt; 변경이력</h3>
           <div className="table-responsive">
             <table className="detail-table history-table">

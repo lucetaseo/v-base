@@ -4,6 +4,9 @@ import { useAuth } from '../auth/AuthContext.jsx';
 import { ESIGN_STATUS, currentHasFeature } from '../constants.js';
 import ContractDocument from './ContractDocument.jsx';
 import ContractDrawings from './ContractDrawings.jsx';
+
+// 계약서에 넣는 도면: 확정 기능(drawingConfirm)을 켠 업체는 확정된 것만 (고객이 받는 계약서와 같게)
+const shownDrawings = (list) => (list || []).filter((d) => !currentHasFeature('drawingConfirm') || d.confirmedAt);
 import ErrorBoundary from './ErrorBoundary.jsx';
 import KakaoModal from './KakaoModal.jsx';
 import OnSiteSign from './OnSiteSign.jsx';
@@ -81,13 +84,13 @@ export default function ContractViewModal({ contractId, onClose, onChanged }) {
 
         <ErrorBoundary title="계약서를 보여 주는 중 오류가 났습니다." onClose={onClose}>
           <ContractDocument contract={contract} contracts={list} company={company} />
-          {currentHasFeature('drawings') && currentHasFeature('drawingsInContract') && list.some((c) => c.drawings?.length) && (
+          {currentHasFeature('drawings') && currentHasFeature('drawingsInContract') && list.some((c) => shownDrawings(c.drawings).length) && (
             <ContractDrawings
               load={() =>
                 Promise.all(
                   list
-                    .filter((c) => c.drawings?.length)
-                    .map(async (c) => ({ contractId: c.id, category: c.category, lines: c.lineItems || [], drawings: await contractApi.drawings(c.id) })),
+                    .filter((c) => shownDrawings(c.drawings).length)
+                    .map(async (c) => ({ contractId: c.id, category: c.category, lines: c.lineItems || [], drawings: shownDrawings(await contractApi.drawings(c.id)) })),
                 )
               }
             />

@@ -124,6 +124,8 @@ const READ_ONLY = new Set([
   'contracts.stepPhotos',
   'contracts.drawings',
   'products.photo',
+  'contracts.customerDocs',
+  'customerApp.documents',
   'customerApp.drawings',
   'esign.getByToken',
   'esign.drawings',
@@ -227,6 +229,11 @@ const SLIM_CALLS = new Set(['contracts.list', 'contracts.listCached', 'reports.c
 //   첫 인자 = 계약 번호(또는 번호 목록). contracts.create 는 모두 가볍게 (새 계약만 전체)
 const FOCUS_CALLS = new Set([
   'contracts.get',
+  'contracts.confirmDrawing',
+  'contracts.customerDocs',
+  'contracts.setCustomerDocs',
+  'contracts.confirmFile',
+  'contracts.removeFile',
   'contracts.create',
   'contracts.update',
   'contracts.updateSchedule',
@@ -424,6 +431,7 @@ async function handleRpcOnce(req, attempt) {
     } else if (service === 'customerApp') {
       scope = { companyId: await companyIdForCustomer(client, name, args, ctx.session) }; // 고객모바일
       if (name === 'customerApp.drawings') Object.assign(scope, { receiptsFor: args[0], productPhotos: true }); // 도면 그림 + 제품 사진
+      if (name === 'customerApp.documents') scope.receiptsFor = args[0]; // 내려받을 도면 그림
     } else {
       const who = await resolveCompanyId(client, ctx.session);
       scope = who.isSuper ? { allCompanies: true } : { companyId: who.companyId };

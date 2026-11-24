@@ -77,6 +77,8 @@ export const FEATURES = [
   { key: 'drawings', label: '시공 도면 (공간별 도면에 조명 아이콘 · 도형 · 글자, 제품 연결, 범례)', on: true },
   { key: 'statement', label: '거래명세서 (계약 상세 → 인쇄 / PDF 저장, 공급자는 업체 정보)', on: false },
   { key: 'contractScan', label: '계약서 스캔 (종이 계약서 사진 → AI 가 계약 등록 칸 채우기, 사람이 확인 후 저장 · 서버 키 필요)', on: false },
+  { key: 'drawingConfirm', label: '도면 확정 후 고객 공개 (확정한 도면만 고객 화면·계약서에 — 고치면 다시 확정)', on: true },
+  { key: 'customerDocs', label: '고객 문서 내려받기 (계약마다 계약서·확정 도면·거래명세서·파일 중 고른 것만 고객이 받음)', on: true },
   { key: 'drawingsInContract', label: '계약서에 시공 도면 넣기 (계약서 보기·인쇄·고객 서명 화면 아래에 도면)', on: true },
   { key: 'customerDrawings', label: '고객 도면 보기 (고객 확인 페이지에서 도면 · 아이콘 누르면 제품 사진·사양)', on: true },
   { key: 'contractReview', label: '계약 검수 (실물 계약서와 대조 후 [점검 완료] · 검수자·일시 기록)', on: true },
