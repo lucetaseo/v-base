@@ -1,11 +1,13 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { compressImage } from '../utils/image.js';
+import { PLAN_ACCEPT, planPages } from '../utils/planFile.js';
 
 // 시공 도면 (계약 상세 > 시공관리, 기능 drawings) — 아르떼(조명)
 //   층별 도면(그림) 위에 조명 아이콘을 놓고(누르기) · 옮기고(끌기) · 지우기, 확대·축소, 범례, 계약 상품 줄과 연결
 //   api: { list(), save({ drawingId, name, image, w, h, icons }), remove(drawingId) }
 //   lines: 계약 상품 줄 (아이콘 ↔ 제품 연결, 범례에서 계약 수량과 비교)
 //   canEdit: false 면 보기만 (아이콘을 누르면 설명)
+//   renderInfo(icon, line): 보기 전용에서 아이콘을 눌렀을 때 보일 내용 (고객 화면: 제품 사진·사양 카드)
 export const ICONS = {
   downlight: { label: '다운라이트', short: 'DL', color: '#f59e0b' },
   recessed: { label: '우물·매입등', short: '매입', color: '#d97706' },
@@ -41,7 +43,7 @@ export function DrawingIcon({ type, selected, title, onPointerDown, onClick, sty
 const lineLabel = (lines, i) => (i === null || i === undefined || !lines[i] ? '' : `${lines[i].name}${lines[i].qty > 1 ? ` (계약 ${lines[i].qty}개)` : ''}`);
 const newId = () => `i${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 
-export default function DrawingEditor({ api, lines = [], canEdit = false, onError }) {
+export default function DrawingEditor({ api, lines = [], canEdit = false, onError, renderInfo }) {
   const [list, setList] = useState(null);
   const [activeId, setActiveId] = useState(null);
   const [icons, setIcons] = useState([]); // 고치는 중인 아이콘 (저장 전)
@@ -51,6 +53,7 @@ export default function DrawingEditor({ api, lines = [], canEdit = false, onErro
   const [sel, setSel] = useState(null); // 고른 아이콘 id
   const [zoom, setZoom] = useState(1);
   const [busy, setBusy] = useState('');
+  const [chooser, setChooser] = useState(null); // 여러 페이지(PDF·PPT)에서 고르기 { mode: add|replace, pages, picked }
   const board = useRef(null);
   const drag = useRef(null);
 
@@ -95,16 +98,45 @@ export default function DrawingEditor({ api, lines = [], canEdit = false, onErro
     return { image, ...size };
   };
 
-  const addDrawing = async (e) => {
-    const file = e.target.files?.[0];
-    e.target.value = '';
-    if (!file || !confirmLeave()) return;
-    const name = window.prompt('도면 이름 (예: 1층, 2층, 거실)', `${(list?.length || 0) + 1}층`);
-    if (name === null) return;
-    setBusy('도면 올리는 중...');
+  // 도면 파일(그림·PDF·PPT) → 페이지들. 여러 장이면 고르는 창
+  const openPlanFile = async (file) => {
+    setBusy('파일 여는 중...');
     try {
-      const r = await api.save({ name, ...(await readImage(file)), icons: [] });
-      await load(r.drawing.id);
+      return await planPages(file);
+    } catch (err) {
+      onError?.(err);
+      return null;
+    } finally {
+      setBusy('');
+    }
+  };
+
+  const addPages = async (pages, askName) => {
+    let name = '';
+    if (askName) {
+      name = window.prompt('도면 이름 (예: 1층, 2층, 거실)', `${(list?.length || 0) + 1}층`);
+      if (name === null) return;
+    }
+    let lastId = null;
+    try {
+      for (let i = 0; i < pages.length; i++) {
+        setBusy(`도면 올리는 중 ${pages.length > 1 ? `${i + 1}/${pages.length}` : ''}`);
+        const r = await api.save({ name: name || `${(list?.length || 0) + i + 1}층`, ...(await readImage(pages[i].file)), icons: [] });
+        lastId = r.drawing.id;
+      }
+    } catch (err) {
+      onError?.(err);
+    } finally {
+      setBusy('');
+      await load(lastId);
+    }
+  };
+
+  const replaceWith = async (page) => {
+    setBusy('그림 바꾸는 중...');
+    try {
+      await api.save({ drawingId: active.id, ...(await readImage(page.file)), icons });
+      await load(active.id);
     } catch (err) {
       onError?.(err);
     } finally {
@@ -112,19 +144,33 @@ export default function DrawingEditor({ api, lines = [], canEdit = false, onErro
     }
   };
 
+  const addDrawing = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file || !confirmLeave()) return;
+    const pages = await openPlanFile(file);
+    if (!pages) return;
+    if (pages.length === 1) return addPages(pages, true);
+    setChooser({ mode: 'add', pages, picked: pages.map((_, i) => i === 0) });
+  };
+
   const replaceImage = async (e) => {
     const file = e.target.files?.[0];
     e.target.value = '';
     if (!file || !active) return;
-    setBusy('그림 바꾸는 중...');
-    try {
-      await api.save({ drawingId: active.id, ...(await readImage(file)), icons });
-      await load(active.id);
-    } catch (err) {
-      onError?.(err);
-    } finally {
-      setBusy('');
-    }
+    const pages = await openPlanFile(file);
+    if (!pages) return;
+    if (pages.length === 1) return replaceWith(pages[0]);
+    setChooser({ mode: 'replace', pages, picked: pages.map((_, i) => i === 0) });
+  };
+
+  const chooseDone = async () => {
+    const { mode, pages, picked } = chooser;
+    const sel = pages.filter((_, i) => picked[i]);
+    setChooser(null);
+    if (!sel.length) return;
+    if (mode === 'replace') return replaceWith(sel[0]);
+    return addPages(sel, sel.length === 1);
   };
 
   const rename = async () => {
@@ -213,12 +259,20 @@ export default function DrawingEditor({ api, lines = [], canEdit = false, onErro
     return () => window.removeEventListener('keydown', key);
   }); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const width = active?.w ? Math.min(active.w, 1100) : 900;
+  const stage = useRef(null);
+  // 보기 전용(고객 화면 등): 처음엔 도면이 화면 폭에 맞게
+  useEffect(() => {
+    if (canEdit || !active || !stage.current) return;
+    const fit = (stage.current.clientWidth - 4) / width;
+    if (fit > 0 && fit < 1) setZoom(Math.max(0.3, Math.floor(fit * 100) / 100));
+  }, [activeId, width]); // eslint-disable-line react-hooks/exhaustive-deps
+
   if (list === null) return <div className="sub-text">도면 불러오는 중...</div>;
 
   // 범례: 종류별 개수 / 제품(상품 줄)별 개수 ↔ 계약 수량
   const byType = TYPES.map((t) => [t, icons.filter((ic) => ic.type === t).length]).filter(([, n]) => n);
   const byLine = lines.map((l, i) => ({ l, i, n: icons.filter((ic) => ic.line === i).length })).filter((x) => x.n || canEdit);
-  const width = active?.w ? Math.min(active.w, 1100) : 900;
 
   return (
     <div className="dwg">
@@ -231,14 +285,16 @@ export default function DrawingEditor({ api, lines = [], canEdit = false, onErro
         {canEdit && (
           <label className="dwg-add">
             + 도면 추가
-            <input type="file" accept="image/*" onChange={addDrawing} hidden />
+            <input type="file" accept={PLAN_ACCEPT} onChange={addDrawing} hidden />
           </label>
         )}
         {busy && <span className="sub-text">⏳ {busy}</span>}
       </div>
 
+      {chooser && <PageChooser chooser={chooser} setChooser={setChooser} onDone={chooseDone} />}
+
       {!active ? (
-        <p className="sub-text">{canEdit ? '등록된 도면이 없습니다. [+ 도면 추가]로 도면 그림(사진·이미지)을 올려 주세요. (PDF 는 그림으로 저장해서 올려 주세요)' : '등록된 도면이 없습니다.'}</p>
+        <p className="sub-text">{canEdit ? '등록된 도면이 없습니다. [+ 도면 추가]로 도면 파일(그림 jpg·png, PDF, PPT)을 올려 주세요. PPT 는 슬라이드에 붙인 도면 그림을 꺼내 오고, 도형으로 그린 도면은 PDF 로 저장해서 올리면 그대로 보입니다.' : '등록된 도면이 없습니다.'}</p>
       ) : (
         <>
           {canEdit && (
@@ -276,7 +332,7 @@ export default function DrawingEditor({ api, lines = [], canEdit = false, onErro
                 <button type="button" className="btn-link" onClick={rename}>이름 바꾸기</button>
                 <label className="btn-link">
                   그림 바꾸기
-                  <input type="file" accept="image/*" onChange={replaceImage} hidden />
+                  <input type="file" accept={PLAN_ACCEPT} onChange={replaceImage} hidden />
                 </label>
                 <button type="button" className="btn-text-danger" onClick={removeActive}>도면 삭제</button>
               </div>
@@ -293,7 +349,7 @@ export default function DrawingEditor({ api, lines = [], canEdit = false, onErro
             </div>
           )}
 
-          <div className="dwg-stage">
+          <div className="dwg-stage" ref={stage}>
             <div
               ref={board}
               className={`dwg-board ${canEdit && tool ? 'placing' : ''}`}
@@ -336,6 +392,8 @@ export default function DrawingEditor({ api, lines = [], canEdit = false, onErro
                   <input className="input-text" value={selected.note} onChange={(e) => setSelected({ note: e.target.value })} placeholder="메모 (예: 거실 중앙, 높이 2.4m)" maxLength={100} />
                   <button type="button" className="btn-text-danger" onClick={removeSelected}>아이콘 삭제</button>
                 </>
+              ) : renderInfo ? (
+                renderInfo(selected, selected.line === null || selected.line === undefined ? null : lines[selected.line])
               ) : (
                 <span>
                   <b>{ICONS[selected.type]?.label}</b> {lineLabel(lines, selected.line)} {selected.note && `· ${selected.note}`}
@@ -355,7 +413,7 @@ export default function DrawingEditor({ api, lines = [], canEdit = false, onErro
                 </span>
               ))}
             </div>
-            {byLine.length > 0 && (
+            {byLine.length > 0 && !renderInfo && (
               <div className="dwg-legend-lines">
                 <b>제품별</b>
                 {byLine.map(({ l, i, n }) => (
@@ -368,6 +426,34 @@ export default function DrawingEditor({ api, lines = [], canEdit = false, onErro
           </div>
         </>
       )}
+    </div>
+  );
+}
+
+// PDF·PPT 에서 도면으로 쓸 페이지 고르기 (추가: 여러 장 → 층마다 도면, 바꾸기: 1장)
+function PageChooser({ chooser, setChooser, onDone }) {
+  const [urls] = useState(() => chooser.pages.map((p) => URL.createObjectURL(p.file)));
+  useEffect(() => () => urls.forEach((u) => URL.revokeObjectURL(u)), [urls]);
+  const multi = chooser.mode === 'add';
+  const toggle = (i) => setChooser({ ...chooser, picked: chooser.picked.map((v, j) => (multi ? (j === i ? !v : v) : j === i)) });
+  const n = chooser.picked.filter(Boolean).length;
+  return (
+    <div className="dwg-chooser">
+      <div className="bold-text">{multi ? '도면으로 쓸 페이지를 고르세요 (여러 장 고르면 한 장씩 도면이 됩니다)' : '바꿀 그림을 고르세요'}</div>
+      <div className="dwg-chooser-grid">
+        {chooser.pages.map((p, i) => (
+          <button key={i} type="button" className={chooser.picked[i] ? 'picked' : ''} onClick={() => toggle(i)}>
+            <img src={urls[i]} alt={p.label} />
+            <span>{chooser.picked[i] ? '✔ ' : ''}{p.label}</span>
+          </button>
+        ))}
+      </div>
+      <div className="inline-fields">
+        <button type="button" className="btn-dark-sm" onClick={onDone} disabled={!n}>
+          {multi ? `${n}장 도면으로 추가` : '이 그림으로 바꾸기'}
+        </button>
+        <button type="button" className="btn-link" onClick={() => setChooser(null)}>취소</button>
+      </div>
     </div>
   );
 }

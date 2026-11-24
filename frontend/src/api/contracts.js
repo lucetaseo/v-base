@@ -1489,8 +1489,14 @@ function customerContractView(db, c) {
     })),
     amounts: { total: a.total, discount: a.discount + a.voucher, actual: a.actual - a.canceled, deposit: a.byKind['계약금'] || 0, paid: a.paid - a.refund, balance: a.balance },
     esign: { status: c.esign?.status || ESIGN_STATUS.NONE, token: waiting ? c.esign.token : null, signedAt: c.esign?.signedAt || null },
+    drawingCount: customerSeesDrawings(db, c) ? (c.drawings || []).length : 0, // 고객 도면 보기 (기능 drawings + customerDrawings)
   };
 }
+
+const customerSeesDrawings = (db, c) => {
+  const company = db.companies.find((x) => x.id === c.companyId);
+  return hasFeature(company, 'drawings') && hasFeature(company, 'customerDrawings');
+};
 
 async function customerSession(db) {
   const raw = (await getSession()) || {};
@@ -1549,6 +1555,23 @@ export const customerApp = {
     // 상담 버튼(기능 customerHelp): 고객센터 전화 · 카카오톡 상담 주소 · 상담 시간
     const help = hasFeature(company, 'customerHelp') ? { csPhone: company?.csPhone || '', kakaoUrl: company?.kakaoUrl || '', csHours: company?.csHours || '' } : null;
     return { company: { name: company?.name || '', code: company?.code || '', help }, customer: { name: db.contracts.find((c) => ownedBy(c, cust))?.customerName || '' }, contracts: list };
+  },
+
+  // 시공 도면 (읽기 전용) + 상품 줄별 제품 설명(이름·수량·내용·사양·사진) — 아이콘을 누르면 그 제품 카드
+  async drawings(id) {
+    const db = await loadDb();
+    const cust = await customerSession(db);
+    const c = db.contracts.find((x) => x.id === Number(id) && ownedBy(x, cust));
+    if (!c) throw new ApiError('계약을 찾을 수 없습니다.', 'NOT_FOUND');
+    requireFeature(db, cust.companyId, 'drawings');
+    requireFeature(db, cust.companyId, 'customerDrawings');
+    const photoOf = (pid) => (db.paymentReceipts || []).find((r) => r.kind === 'productPhoto' && r.productId === pid && r.companyId === c.companyId)?.image || '';
+    const lines = (c.lineItems || []).map((l) => {
+      const p = l.productId ? db.products.find((x) => x.id === l.productId && x.companyId === c.companyId) : null;
+      return { name: l.name, qty: l.qty, detail: l.detail || '', spec: p?.spec || '', photo: p?.hasPhoto ? photoOf(p.id) : '' };
+    });
+    const drawings = listDrawings(db, c).map(({ id: did, name, image, w, h, icons }) => ({ id: did, name, image, w, h, icons: (icons || []).map(({ id: iid, type, x, y, line }) => ({ id: iid, type, x, y, line })) }));
+    return { drawings, lines };
   },
 
   async logout() {

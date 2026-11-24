@@ -2596,3 +2596,58 @@ test('시공 도면 (drawings): 층별 도면 그림 + 조명 아이콘 저장·
   assert.equal((await admin('contracts', 'drawings', c.id)).status, 403, '기능을 끈 업체는 도면 불가');
   await sup.ok('companies', 'update', good.id, { features: {} });
 });
+
+test('고객 도면 보기 (customerDrawings): 제품 사양·사진 → 고객이 도면에서 아이콘을 누르면 제품 설명, 메모는 안 보임, 다른 고객 불가, 기능 스위치', async () => {
+  const admin = client();
+  await admin.ok('auth', 'login', 'admin', 'admin1234');
+  const prod = await admin.ok('products', 'save', { name: '다운라이트 3인치 (고객도면)', kind: '패키지', category: '조명', price: 30000, spec: '3인치 LED 6W · 4000K' });
+  assert.equal(prod.spec, '3인치 LED 6W · 4000K');
+  const photo = 'data:image/png;base64,' + Buffer.from('product-photo').toString('base64');
+  assert.equal((await admin('products', 'setPhoto', prod.id, 'data:text/html;base64,AAAA')).status, 400, '그림만');
+  assert.equal((await admin.ok('products', 'setPhoto', prod.id, photo)).hasPhoto, true);
+  assert.equal((await admin.ok('products', 'photo', prod.id)).image, photo);
+  assert.equal((await admin.ok('products', 'list', { includeInactive: true })).find((x) => x.id === prod.id).hasPhoto, true);
+  // 상품을 고쳐도 사진 표시는 그대로
+  await admin.ok('products', 'save', { ...prod, hasPhoto: undefined, price: 31000 });
+  assert.equal((await admin.ok('products', 'list', { includeInactive: true })).find((x) => x.id === prod.id).hasPhoto, true);
+
+  const c = await admin.ok('contracts', 'create', {
+    ...base,
+    customerName: '도면보는고객',
+    customerPhone: '010-4848-2222',
+    lineItems: [
+      { productId: prod.id, name: prod.name, qty: 4, unitPrice: 30000 },
+      { name: '직접 쓴 품목', qty: 1, unitPrice: 10000 },
+    ],
+  });
+  const img = 'data:image/png;base64,' + Buffer.from('floor').toString('base64');
+  await admin.ok('contracts', 'saveDrawing', c.id, { name: '1층', image: img, icons: [{ id: 'a', type: 'downlight', x: 10, y: 10, line: 0, note: '사무실 메모' }, { id: 'b', type: 'switch', x: 20, y: 20, line: 1 }] });
+
+  const cust = client();
+  const me = await cust.ok('customerApp', 'login', 'thegood', '도면보는고객', '01048482222');
+  assert.equal(me.contracts.find((x) => x.id === c.id).drawingCount, 1);
+  const d = await cust.ok('customerApp', 'drawings', c.id);
+  assert.equal(d.drawings.length, 1);
+  assert.equal(d.drawings[0].image, img);
+  assert.equal(d.drawings[0].icons[0].note, undefined, '사무실 메모는 고객에게 안 보임');
+  assert.deepEqual(d.lines[0], { name: prod.name, qty: 4, detail: '', spec: '3인치 LED 6W · 4000K', photo });
+  assert.equal(d.lines[1].photo, '');
+  // 다른 고객의 계약은 불가
+  const other = await admin.ok('contracts', 'create', { ...base, customerName: '남의고객', customerPhone: '010-4848-3333' });
+  assert.equal((await cust('customerApp', 'drawings', other.id)).status, 404);
+  // 사진 지우기
+  await admin.ok('products', 'setPhoto', prod.id, '');
+  assert.equal((await cust.ok('customerApp', 'drawings', c.id)).lines[0].photo, '');
+  // 기능 스위치: customerDrawings 를 끄면 고객 도면 불가 (사무실 도면은 그대로)
+  const sup = client();
+  await sup.ok('auth', 'login', 'super', 'super-test-1234');
+  const good = (await sup.ok('companies', 'list')).find((x) => x.code === 'thegood');
+  await sup.ok('companies', 'update', good.id, { features: { customerDrawings: false } });
+  assert.equal((await cust('customerApp', 'drawings', c.id)).status, 403);
+  assert.equal((await cust.ok('customerApp', 'me')).contracts.find((x) => x.id === c.id).drawingCount, 0);
+  assert.equal((await admin.ok('contracts', 'drawings', c.id)).length, 1);
+  await sup.ok('companies', 'update', good.id, { features: {} });
+  // 상품을 지우면 사진도 함께
+  await admin.ok('products', 'setPhoto', prod.id, photo);
+  await admin.ok('products', 'remove', prod.id);
+});

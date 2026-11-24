@@ -5,6 +5,7 @@ import { timeLabel } from '../utils/contract.js';
 import { formatPhone, won } from '../utils/format.js';
 import { formatKoreanDate } from '../utils/date.js';
 import { navigate } from '../router.js';
+import DrawingEditor, { ICONS } from '../components/DrawingEditor.jsx';
 
 // 고객모바일 (/{업체}/c, 알림톡 링크 /{업체}/c/{고유값})
 //   - 링크로 들어오면 입력 없이 바로 로그인
@@ -225,6 +226,8 @@ function MyContracts({ data }) {
             </div>
           )}
 
+          {c.drawingCount > 0 && <CustDrawings contractId={c.id} count={c.drawingCount} />}
+
           <div className="cust-actions">
             {c.esign.token ? (
               <a className={`btn-confirm ${c.esign.status === '서명완료' ? 'outline' : ''}`} href={`/sign/${c.esign.token}`}>
@@ -237,6 +240,61 @@ function MyContracts({ data }) {
         </section>
       ))}
       {data.company.help && <CustHelp help={data.company.help} />}
+    </div>
+  );
+}
+
+// 시공 도면 (기능 drawings + customerDrawings): 보기 전용 — 아이콘을 누르면 그 제품의 사진·사양
+function CustDrawings({ contractId, count }) {
+  const [open, setOpen] = useState(false);
+  const [data, setData] = useState(null);
+  const [error, setError] = useState('');
+  const toggle = async () => {
+    if (!open && !data) {
+      try {
+        setError('');
+        setData(await customerApp.drawings(contractId));
+      } catch (e) {
+        setError(e.message || '도면을 불러오지 못했습니다.');
+        return;
+      }
+    }
+    setOpen((v) => !v);
+  };
+  return (
+    <div className="cust-drawings">
+      <button type="button" className="btn-confirm outline" onClick={toggle}>
+        {open ? '도면 접기' : `🗺 시공 도면 보기 (${count}장)`}
+      </button>
+      {error && <p className="login-error">{error}</p>}
+      {open && data && (
+        <>
+          <p className="sub-text">도면의 아이콘을 누르면 어떤 제품이 설치되는지 볼 수 있습니다.</p>
+          <DrawingEditor
+            api={{ list: async () => data.drawings }}
+            lines={data.lines}
+            canEdit={false}
+            onError={(e) => setError(e.message)}
+            renderInfo={(icon, line) => <ProductCard icon={icon} line={line} />}
+          />
+        </>
+      )}
+    </div>
+  );
+}
+
+function ProductCard({ icon, line }) {
+  const [big, setBig] = useState(false);
+  return (
+    <div className="cust-product">
+      {line?.photo && <img className={big ? 'big' : ''} src={line.photo} alt={line.name} onClick={() => setBig((v) => !v)} />}
+      <div>
+        <div className="bold-text">{line ? line.name : ICONS[icon.type]?.label}</div>
+        <div className="sub-text">{ICONS[icon.type]?.label}{line?.qty > 1 ? ` · 이 제품 ${line.qty}개 시공` : ''}</div>
+        {line?.detail && <div className="pre-wrap">{line.detail}</div>}
+        {line?.spec && <div className="pre-wrap cust-product-spec">{line.spec}</div>}
+        {!line && <div className="sub-text">제품 설명이 아직 등록되지 않았습니다.</div>}
+      </div>
     </div>
   );
 }
