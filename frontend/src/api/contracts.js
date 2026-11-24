@@ -1570,7 +1570,7 @@ export const customerApp = {
       const p = l.productId ? db.products.find((x) => x.id === l.productId && x.companyId === c.companyId) : null;
       return { name: l.name, qty: l.qty, detail: l.detail || '', spec: p?.spec || '', photo: p?.hasPhoto ? photoOf(p.id) : '' };
     });
-    const drawings = listDrawings(db, c).map(({ id: did, name, image, w, h, icons }) => ({ id: did, name, image, w, h, icons: (icons || []).map(({ id: iid, type, x, y, line }) => ({ id: iid, type, x, y, line })) }));
+    const drawings = listDrawings(db, c).map(({ id: did, name, image, w, h, icons, shapes }) => ({ id: did, name, image, w, h, shapes: shapes || [], icons: (icons || []).map(({ id: iid, type, x, y, line }) => ({ id: iid, type, x, y, line })) }));
     return { drawings, lines };
   },
 

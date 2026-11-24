@@ -3,6 +3,7 @@
 //   계약의 drawings: [{ id, name(예: 1층), imageId, w, h, icons: [{ id, type, x, y, line, note }], updatedAt, byName }]
 //     x·y 는 도면 그림 안의 위치(0~100%) — 화면 크기·확대와 상관없이 같은 자리
 //     line: 계약 상품 줄 번호(0부터) — 그 아이콘이 어느 제품인지 (없으면 null)
+//   shapes: [{ id, kind(rect·ellipse·line·arrow·text), x, y, x2, y2, text, color, size, fill }] — 도형·선·글자 (위치 0~100%)
 //   도면 그림은 영수증·사진과 같은 표(paymentReceipts)에 kind 'drawing' (사진 저장소를 켜면 저장소로)
 //   보기: 계약 보기 권한 · 고치기: 계약 수정 권한
 // ============================================================
@@ -15,6 +16,9 @@ export const ICONS_MAX = 400; // 도면 하나에 아이콘 최대
 const IMAGE_MAX = 4 * 1024 * 1024; // 도면 그림 1장 최대 약 4MB (화면에서 줄여서 올림)
 
 // 조명 아이콘 종류 (화면 모양은 components/DrawingEditor.jsx 의 ICONS)
+export const SHAPES_MAX = 300; // 도면 하나에 도형·선·글자 최대
+export const SHAPE_KINDS = ['rect', 'ellipse', 'line', 'arrow', 'text'];
+export const SHAPE_COLORS = ['#ef4444', '#2563eb', '#16a34a', '#111827', '#f59e0b', '#9333ea'];
 export const ICON_TYPES = ['downlight', 'recessed', 'ceilingfan', 'pendant', 'indirect', 'track', 'wall', 'spot', 'sensor', 'switch', 'outlet', 'etc'];
 
 const imageOf = (db, c, imageId) => (db.paymentReceipts || []).find((r) => r.id === imageId && r.contractId === c.id && r.kind === DRAWING_KIND);
@@ -36,8 +40,27 @@ function cleanIcons(icons, lineCount) {
   }));
 }
 
+function cleanShapes(shapes) {
+  return (Array.isArray(shapes) ? shapes : [])
+    .filter((s) => SHAPE_KINDS.includes(s?.kind))
+    .slice(0, SHAPES_MAX)
+    .map((s, i) => ({
+      id: String(s.id || `s${i + 1}`).slice(0, 20),
+      kind: s.kind,
+      x: num(s.x, 0, 100),
+      y: num(s.y, 0, 100),
+      x2: num(s.x2 ?? s.x, 0, 100),
+      y2: num(s.y2 ?? s.y, 0, 100),
+      text: s.kind === 'text' ? String(s.text || '').trim().slice(0, 100) : '',
+      color: SHAPE_COLORS.includes(s.color) ? s.color : SHAPE_COLORS[0],
+      size: Math.min(8, Math.max(1, Math.round(Number(s.size) || 3))),
+      fill: !!s.fill && (s.kind === 'rect' || s.kind === 'ellipse'),
+    }))
+    .filter((s) => s.kind !== 'text' || s.text);
+}
+
 // 도면 저장: drawingId 가 없으면 새 도면(그림 필수), 있으면 이름·아이콘(·그림 바꾸기)
-export function saveDrawing(db, user, c, { drawingId, name, image, w, h, icons } = {}) {
+export function saveDrawing(db, user, c, { drawingId, name, image, w, h, icons, shapes } = {}) {
   c.drawings = c.drawings || [];
   let d = drawingId ? c.drawings.find((x) => x.id === Number(drawingId)) : null;
   if (drawingId && !d) throw new ApiError('도면을 찾을 수 없습니다.', 'NOT_FOUND');
@@ -63,6 +86,7 @@ export function saveDrawing(db, user, c, { drawingId, name, image, w, h, icons }
   }
   d.name = String(name ?? d.name ?? '').trim().slice(0, 30) || `도면 ${c.drawings.indexOf(d) + 1}`;
   if (icons !== undefined) d.icons = cleanIcons(icons, (c.lineItems || []).length);
+  if (shapes !== undefined) d.shapes = cleanShapes(shapes);
   d.updatedAt = nowIso();
   d.byName = user.name || '';
   c.updatedAt = nowIso();
