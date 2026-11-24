@@ -74,6 +74,7 @@ export const FEATURES = [
   { key: 'paintContract', label: '신화탄성 탄성·페인트 계약서 (시공장소·품질보증·구역, 곰팡이방지·AS보장·후기 페이백, 업체 정보 칸)', on: true },
   { key: 'photoStorage', label: '사진 전용 저장소 (새 사진을 DB 대신 사진 저장소에)', on: true },
   { key: 'stepPhotos', label: '시공 사진 (시공 1~4차 회차마다 사진 올리기 · 기사모바일·계약 상세)', on: true },
+  { key: 'drawings', label: '시공 도면 (층별 도면에 조명 아이콘 배치 · 제품 연결 · 범례)', on: true },
   { key: 'contractReview', label: '계약 검수 (실물 계약서와 대조 후 [점검 완료] · 검수자·일시 기록)', on: true },
   { key: 'householdLinks', label: '세대 참고 링크 (계약마다 참고 링크 여러 개)', on: true },
   { key: 'customerHelp', label: '고객 페이지 시공 달력 · 카카오톡/전화 상담 버튼', on: true },

@@ -16,6 +16,7 @@ import ContractViewModal from '../components/ContractViewModal.jsx';
 import { PAPER_MAX } from '../components/PaperPhotos.jsx';
 import PhotoViewer from '../components/PhotoViewer.jsx';
 import StepPhotos from '../components/StepPhotos.jsx';
+import DrawingEditor from '../components/DrawingEditor.jsx';
 import LineItems from '../components/LineItems.jsx';
 import MapLink from '../components/MapLink.jsx';
 import WorkRecord from '../components/WorkRecord.jsx';
@@ -276,6 +277,24 @@ export default function ContractDetail({ contractId, initialTab, focus, onBack, 
     remove: (photoId) => contractApi.removeStepPhoto(selected.id, photoId),
     update: (photoId, note) => contractApi.updateStepPhoto(selected.id, photoId, note),
   };
+  // 시공 도면 (기능 drawings): 고른 시공의 층별 도면 + 조명 아이콘
+  const drawingSection = selected && currentHasFeature('drawings') && (
+    <>
+      <h3 className="form-section-title">&gt; 시공 도면 — {selected.category}</h3>
+      <DrawingEditor
+        key={selected.id}
+        api={{
+          list: () => contractApi.drawings(selected.id),
+          save: (d) => contractApi.saveDrawing(selected.id, d),
+          remove: (drawingId) => contractApi.removeDrawing(selected.id, drawingId),
+        }}
+        lines={selected.lineItems || []}
+        canEdit={canDo('contract.edit', selected) && !selected.deletedAt}
+        onError={handleError}
+      />
+    </>
+  );
+
   const stepPhotoSection = selected && currentHasFeature('stepPhotos') && (
     <>
       <h3 className="form-section-title">&gt; 시공 사진 — {selected.category}</h3>
@@ -765,6 +784,7 @@ export default function ContractDetail({ contractId, initialTab, focus, onBack, 
           {amountSection}
           {workList}
           {workInfo}
+          {drawingSection}
           {stepPhotoSection}
           {progressSection}
         </>

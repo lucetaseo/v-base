@@ -2536,3 +2536,63 @@ test('아르떼 바로 반영 묶음: 입금 확인자, 주 연락처, 세대 �
   assert.equal((await cust.ok('customerApp', 'me')).company.help, null);
   await sup.ok('companies', 'update', good.id, { features: {} });
 });
+
+test('시공 도면 (drawings): 층별 도면 그림 + 조명 아이콘 저장·옮김·제품 연결, 잘못된 값 정리, 목록에는 싣지 않음, 삭제, 기능 스위치', async () => {
+  const admin = client();
+  await admin.ok('auth', 'login', 'admin', 'admin1234');
+  const c = await admin.ok('contracts', 'create', {
+    ...base,
+    customerName: '도면고객',
+    customerPhone: '010-4747-1111',
+    lineItems: [
+      { name: '다운라이트 3인치', qty: 6, unitPrice: 30000 },
+      { name: '실링팬', qty: 1, unitPrice: 250000 },
+    ],
+  });
+  const img = 'data:image/png;base64,' + Buffer.from('floor-plan').toString('base64');
+  assert.equal((await admin('contracts', 'saveDrawing', c.id, { name: '1층', icons: [] })).status, 400, '새 도면은 그림 필수');
+  const r = await admin.ok('contracts', 'saveDrawing', c.id, { name: '1층', image: img, w: 1200, h: 800, icons: [] });
+  const id = r.drawing.id;
+  assert.equal(r.drawing.name, '1층');
+  const icons = [
+    { id: 'a', type: 'downlight', x: 12.345, y: 40, line: 0, note: '거실' },
+    { id: 'b', type: 'ceilingfan', x: 150, y: -3, line: 1 }, // 밖으로 나간 위치는 0~100 으로
+    { id: 'c', type: '없는종류', x: 50, y: 50, line: 9 }, // 모르는 종류 → 기타, 없는 상품 줄 → 연결 없음
+  ];
+  await admin.ok('contracts', 'saveDrawing', c.id, { drawingId: id, icons });
+  const list = await admin.ok('contracts', 'drawings', c.id);
+  assert.equal(list.length, 1);
+  assert.ok(list[0].image.startsWith('data:image/png'), '그림까지 받음');
+  assert.deepEqual(
+    list[0].icons.map((i) => [i.id, i.type, i.x, i.y, i.line]),
+    [['a', 'downlight', 12.35, 40, 0], ['b', 'ceilingfan', 100, 0, 1], ['c', 'etc', 50, 50, null]],
+  );
+  // 옮기기(위치만 바꿔 저장) — 그림은 그대로
+  await admin.ok('contracts', 'saveDrawing', c.id, { drawingId: id, icons: list[0].icons.map((i) => (i.id === 'a' ? { ...i, x: 70, y: 20 } : i)) });
+  const moved = (await admin.ok('contracts', 'drawings', c.id))[0];
+  assert.deepEqual([moved.icons[0].x, moved.icons[0].y], [70, 20]);
+  assert.equal(moved.imageId, list[0].imageId, '그림은 그대로');
+  // 2층 추가 → 목록(가벼운 계약)에는 도면이 없음
+  await admin.ok('contracts', 'saveDrawing', c.id, { name: '2층', image: img, icons: [{ type: 'pendant', x: 1, y: 1 }] });
+  assert.equal((await admin.ok('contracts', 'drawings', c.id)).length, 2);
+  assert.equal((await admin.ok('contracts', 'list', {})).find((x) => x.id === c.id).drawings, undefined, '계약 목록에는 도면 없음');
+  assert.ok((await admin.ok('contracts', 'get', c.id)).history.some((h) => h.action === '도면 추가'), '변경이력');
+  // 계약을 고쳐도 도면 그대로
+  await admin.ok('contracts', 'update', c.id, { ...(await admin.ok('contracts', 'get', c.id)), memo: '고침' });
+  assert.equal((await admin.ok('contracts', 'drawings', c.id)).length, 2);
+  // 삭제
+  await admin.ok('contracts', 'removeDrawing', c.id, id);
+  const left = await admin.ok('contracts', 'drawings', c.id);
+  assert.deepEqual(left.map((d) => d.name), ['2층']);
+  // 기사는 사무실 도면 API 불가
+  const eng = client();
+  await eng.ok('auth', 'login', 'gong', 'gong1234', '', 'engineer');
+  assert.notEqual((await eng('contracts', 'drawings', c.id)).status, 200);
+  // 기능 스위치
+  const sup = client();
+  await sup.ok('auth', 'login', 'super', 'super-test-1234');
+  const good = (await sup.ok('companies', 'list')).find((x) => x.code === 'thegood');
+  await sup.ok('companies', 'update', good.id, { features: { drawings: false } });
+  assert.equal((await admin('contracts', 'drawings', c.id)).status, 403, '기능을 끈 업체는 도면 불가');
+  await sup.ok('companies', 'update', good.id, { features: {} });
+});
