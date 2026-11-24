@@ -107,7 +107,9 @@ export default forwardRef(function DrawingEditor({ api, lines = [], canEdit = fa
     if (dirty && active) await api.save({ drawingId: active.id, icons, shapes });
     setDirty(false);
   };
-  useImperativeHandle(ref, () => ({ flush, isDirty: () => dirty }));
+  // addFile(file): 밖의 [도면 추가] 버튼(계약 상세 탭 줄)에서 고른 파일 — 도면 목록을 다 불러온 뒤 추가
+  const [pendingFile, setPendingFile] = useState(null);
+  useImperativeHandle(ref, () => ({ flush, isDirty: () => dirty, addFile: (f) => setPendingFile(f) }));
   const confirmLeave = async () => {
     if (!dirty) return true;
     if (deferred) {
@@ -193,12 +195,22 @@ export default forwardRef(function DrawingEditor({ api, lines = [], canEdit = fa
   const addDrawing = async (e) => {
     const file = e.target.files?.[0];
     e.target.value = '';
+    return addFromFile(file);
+  };
+  const addFromFile = async (file) => {
     if (!file || !(await confirmLeave())) return;
     const pages = await openPlanFile(file);
     if (!pages) return;
     if (pages.length === 1) return addPages(pages, true);
     setChooser({ mode: 'add', pages, picked: pages.map((_, i) => i === 0) });
   };
+
+  useEffect(() => {
+    if (!pendingFile || list === null) return;
+    const f = pendingFile;
+    setPendingFile(null);
+    addFromFile(f);
+  }, [pendingFile, list]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const replaceImage = async (e) => {
     const file = e.target.files?.[0];
