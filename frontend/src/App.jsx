@@ -7,6 +7,7 @@ import { API_MODE, contracts as contractsApi } from './api/index.js';
 import { ROLES, ROLE_LABELS } from './auth/permissions.js';
 import { formatKoreanDate, today } from './utils/date.js';
 import { usePageTitle } from './utils/title.js';
+import { hasFeature } from './constants.js';
 
 import LoginPage, { loginEntry, setLoginEntry } from './pages/LoginPage.jsx';
 import SignPage from './pages/SignPage.jsx';
@@ -17,16 +18,19 @@ import ConsultHome from './pages/ConsultHome.jsx';
 import CustomerManagement from './components/CustomerManagement.jsx';
 import ScheduleManagement from './components/ScheduleManagement.jsx';
 import FairModal from './components/FairModal.jsx';
+import { InstallScreen } from './components/InstallCard.jsx';
 import ProgressStatus from './components/ProgressStatus.jsx';
 import StatsPage from './pages/StatsPage.jsx';
 import PurchasePage from './pages/PurchasePage.jsx';
 import StockPage from './pages/StockPage.jsx';
+import CallLogPage from './pages/CallLogPage.jsx';
 import AccountManagement from './pages/AccountManagement.jsx';
 import SettingsPage from './pages/SettingsPage.jsx';
 import ImportPage from './pages/settings/ImportPage.jsx';
 import AlimtalkSettings from './pages/settings/AlimtalkSettings.jsx';
 import ContractTermsSettings from './pages/settings/ContractTermsSettings.jsx';
 import AuditLogPage from './pages/settings/AuditLogPage.jsx';
+import CompanyFilesPage from './pages/settings/CompanyFilesPage.jsx';
 import { EngineerSettings, TeamSettings, ProductSettings, ApartmentSettings, ScheduleSettings } from './pages/settings/MasterSettings.jsx';
 
 // 메뉴 정의. 새 메뉴는 여기에 추가하고 주소(path)와 필요한 권한(perm)만 지정하면 됩니다.
@@ -39,12 +43,13 @@ const MENUS = [
     path: '/contracts',
     subs: [
       { key: 'main', label: '계약관리', path: '/contracts' },
-      { key: 'as', label: 'AS관리', path: '/contracts/as' },
+      { key: 'as', label: 'AS관리', path: '/contracts/as', feature: 'as' },
       { key: 'trash', label: '휴지통', path: '/contracts/trash', perm: 'contract.delete' },
     ],
   },
   { key: 'customer', label: '계약자관리', icon: '👤', perm: 'customer.view', path: '/customers' },
   { key: 'schedule', label: '일정관리', icon: '📅', perm: 'schedule.view', path: '/schedule' },
+  { key: 'calls', label: '상담내역', icon: '📞', perm: 'calllog.manage', path: '/calls', feature: 'callLog' },
   { key: 'progress', label: '진행상황', icon: '📑', perm: 'stats.view', path: '/progress' },
   {
     key: 'stats',
@@ -52,10 +57,11 @@ const MENUS = [
     icon: '📊',
     perm: 'stats.view',
     path: '/stats',
+    // 매입관리·재고체크는 업체 기능을 켠 곳만 (켜진 하위 메뉴가 없으면 예전처럼 통계정보 하나)
     subs: [
       { key: 'statsMain', label: '통계정보', path: '/stats', exact: true },
-      { key: 'purchases', label: '매입관리', path: '/stats/purchases', perm: 'purchase.manage' },
-      { key: 'stock', label: '재고체크', path: '/stats/stock', perm: 'stock.manage' },
+      { key: 'purchases', label: '매입·매출관리', path: '/stats/purchases', perm: 'purchase.manage', feature: 'purchases' },
+      { key: 'stock', label: '재고체크', path: '/stats/stock', perm: 'stock.manage', feature: 'stocks' },
     ],
   },
   // 운영자 전용 (업체 관리자는 설정 > 사용자관리 에서 실장을 관리)
@@ -75,6 +81,7 @@ const MENUS = [
       { key: 'apartments', label: '아파트관리', path: '/settings/apartments', perm: 'settings.manage' },
       { key: 'scheduleSetting', label: '일정관리설정', path: '/settings/schedule', perm: 'settings.manage' },
       { key: 'import', label: '데이터 가져오기', path: '/settings/import', visible: (u) => u.role === ROLES.ADMIN },
+      { key: 'files', label: '회사 자료 백업', path: '/settings/files', feature: 'companyFiles', visible: (u) => u.role === ROLES.ADMIN || u.role === ROLES.MANAGER },
       { key: 'logs', label: '수정로그', path: '/settings/logs', visible: (u) => u.role === ROLES.ADMIN },
       { key: 'me', label: '내 정보', path: '/me' },
     ],
@@ -83,7 +90,7 @@ const MENUS = [
 
 // 상담실장 화면 (/업체주소/t 로 로그인): 상담홈 + 계약·계약자·일정 + 내 정보만 (통계·진행상황·설정은 숨김)
 const CONSULT_MENU = { key: 'consult', label: '상담홈', icon: '🏠', path: '/consult' };
-const CONSULT_KEYS = ['consult', 'contract', 'customer', 'schedule', 'setting'];
+const CONSULT_KEYS = ['consult', 'contract', 'customer', 'schedule', 'calls', 'setting'];
 
 // 설정 하위 화면
 const SETTING_PAGES = {
@@ -94,6 +101,7 @@ const SETTING_PAGES = {
   apartments: ApartmentSettings,
   scheduleSetting: ScheduleSettings,
   import: ImportPage,
+  files: CompanyFilesPage,
   logs: AuditLogPage,
   me: SettingsPage,
 };
@@ -117,6 +125,11 @@ export default function App() {
   //   /{업체}/c/?q=고유값 도 같음 (알림톡 버튼 링크 모양)
   const cust = route.base && (route.path === '/c' ? { token: route.query.get('q') || undefined } : match('/c/:token', route.path));
   if (cust) return <CustomerApp companyCode={route.base} token={cust.token} />;
+  // 앱 설치 전용 화면 (/업체?install=1 · /업체/t?install=1 · /업체/m?install=1) — 로그인 없이 그 화면 앱 설치
+  if (route.base && route.query.get('install') === '1') {
+    const app = route.path === '/m' ? 'engineer' : route.path === '/t' ? 'manager' : 'staff';
+    return <InstallScreen code={route.base} app={app} />;
+  }
 
   if (loading) return <div className="page-loading">불러오는 중...</div>;
   if (!user) {
@@ -127,10 +140,10 @@ export default function App() {
 }
 
 // 로그인한 계정의 업체 주소(/thegood/...)로 맞춰서 보여줌. 운영자는 업체 코드 없는 주소(/admin)
-//   다른 업체 주소(/sinhwa)로 들어오면 주소를 바꾸지 않고 그 업체 로그인 화면 (받은 링크 그대로 보이게)
 function CompanyGate({ route }) {
   const { user, company } = useAuth();
   const code = user.role === ROLES.SUPER ? '' : company?.code || '';
+  // 다른 업체 주소(/sinhwa)로 들어오면 주소를 바꾸지 않고 그 업체 로그인 화면 (받은 링크 그대로 보이게)
   const otherCompany = route.base && route.base !== code;
   const wrongBase = !otherCompany && route.base !== code;
   useEffect(() => {
@@ -154,8 +167,9 @@ function CompanyGate({ route }) {
 // 로그인한 채로 /업체/t (상담실장 주소)를 열었을 때
 //   실장(직원) 계정 → 상담실장 화면(상담홈)으로 바꿈 / 관리자 계정 → /t 는 직원 전용이라 안내 (로그아웃하고 실장으로)
 function ConsultSwitch() {
-  const { user, logout } = useAuth();
-  const staff = user.role === ROLES.MANAGER;
+  const { user, company, logout } = useAuth();
+  const off = !hasFeature(company, 'manager'); // 업체 기능 스위치로 상담실장 화면을 끔
+  const staff = user.role === ROLES.MANAGER && !off;
   useEffect(() => {
     if (!staff) return;
     setLoginEntry('manager');
@@ -170,11 +184,11 @@ function ConsultSwitch() {
           <p className="login-sub">
             지금 <b>{user.name}({ROLE_LABELS[user.role] || user.role})</b> 계정으로 로그인되어 있습니다.
             <br />
-            상담실장 화면(/t)은 실장(직원) 계정 전용입니다.
+            {off ? '이 업체는 상담실장 화면을 쓰지 않습니다. 일반화면을 이용해 주세요.' : '상담실장 화면(/t)은 실장(직원) 계정 전용입니다.'}
           </p>
         </div>
         <div className="login-form">
-          <button
+          {!off && <button
             type="button"
             onClick={async () => {
               await logout();
@@ -182,7 +196,7 @@ function ConsultSwitch() {
             }}
           >
             로그아웃하고 상담실장으로 로그인
-          </button>
+          </button>}
           <button type="button" className="consult-switch-back" onClick={() => navigate('/', { replace: true })}>
             지금 계정으로 계속 (일반화면)
           </button>
@@ -205,10 +219,11 @@ function MainLayout({ route }) {
   const { path } = route;
 
   const allowed = (item) => {
+    if (item.feature && !hasFeature(company, item.feature)) return false; // 업체 기능 스위치
     if (item.visible) return item.visible(user);
     return !item.perm || can(item.perm);
   };
-  const consult = user.role !== ROLES.SUPER && loginEntry() === 'manager'; // 상담실장 주소(/t)로 들어옴
+  const consult = user.role !== ROLES.SUPER && loginEntry() === 'manager' && hasFeature(company, 'manager'); // 상담실장 주소(/t)로 들어옴
   const menus = (consult ? [CONSULT_MENU, ...MENUS] : MENUS)
     .filter((m) => {
       if (user.role === ROLES.SUPER) return ['accounts', 'alimtalk', 'terms', 'setting'].includes(m.key);
@@ -260,14 +275,14 @@ function MainLayout({ route }) {
     : null;
 
   // 탭 이름: '계약관리 · 더좋은집 VerityBase', AS관리·휴지통 등 하위 메뉴면 그 이름, 운영자는 'VerityBase 운영자'
-  const currentSub = current?.subs?.length > 1 ? current.subs.find((s) => (s.exact ? path === s.path : s.key === 'main' ? path === s.path || /^\/contracts\/(\d+|new)/.test(path) : path.startsWith(s.path))) : null;
+  const currentSub = current?.subs?.length > 1 ? current.subs.find((s) => (s.key === 'main' ? path === s.path || /^\/contracts\/(\d+|new)/.test(path) : s.exact ? path === s.path : path.startsWith(s.path))) : null;
   const pageName = path === '/consult' ? '상담홈' : path === '/contracts/new' ? '계약 등록' : (currentSub || current)?.label || '';
   usePageTitle(
     `${pageName ? `${pageName} · ` : ''}${company ? `${company.name} VerityBase` : 'VerityBase 운영자'}${consult ? ' (상담실장)' : ''}`,
     company ? `${company.name}${consult ? ' 상담' : ''}` : 'VerityBase 운영자',
   );
 
-  const subActive = (s) => (s.exact ? path === s.path : s.key === 'main' ? path === s.path || /^\/contracts\/(\d+|new)/.test(path) : path.startsWith(s.path));
+  const subActive = (s) => (s.key === 'main' ? path === s.path || /^\/contracts\/(\d+|new)/.test(path) : s.exact ? path === s.path : path.startsWith(s.path));
 
   return (
     <div className={`app-container ${consult ? 'consult-mode' : ''}`}>
@@ -310,7 +325,7 @@ function MainLayout({ route }) {
               + 계약 등록
             </a>
           )}
-          {can('fair.manage') && (
+          {can('fair.manage') && hasFeature(company, 'fair') && (
             <button type="button" className="btn-quick green" onClick={() => setFairOpen(true)}>
               🎪 박람회 일정 등록
             </button>
@@ -351,6 +366,7 @@ function MainLayout({ route }) {
         {current?.key === 'contract' && <ContractPage route={route} />}
         {current?.key === 'customer' && <CustomerManagement route={route} />}
         {current?.key === 'schedule' && <ScheduleManagement />}
+        {current?.key === 'calls' && <CallLogPage />}
         {current?.key === 'progress' && <ProgressStatus />}
         {current?.key === 'stats' && <StatsSubPage path={path} subs={current.subs} />}
         {current?.key === 'accounts' && <AccountManagement />}
@@ -362,7 +378,7 @@ function MainLayout({ route }) {
   );
 }
 
-// 통계정보 하위 화면 (권한 없는 하위 메뉴 주소는 통계정보로)
+// 통계정보 하위 화면 (기능·권한 없는 하위 메뉴 주소는 통계정보로)
 function StatsSubPage({ path, subs }) {
   const has = (key) => subs.some((s) => s.key === key);
   if (path.startsWith('/stats/purchases') && has('purchases')) return <PurchasePage />;

@@ -3,9 +3,10 @@
 // (백엔드에서는 인증 미들웨어 + 권한 가드에 해당)
 // ============================================================
 
-import { getSession, loadDb } from './runtime.js';
+import { getSession, loadDb, requestCompany } from './runtime.js';
 import { ROLES, can, isOwnScopeOnly } from '../auth/permissions.js';
 import { today } from '../utils/date.js';
+import { FEATURES, hasFeature } from '../constants.js';
 
 export class ApiError extends Error {
   constructor(message, code = 'BAD_REQUEST') {
@@ -72,6 +73,13 @@ export async function session() {
     user = e && e.passwordHash ? engineerAsUser(e) : null;
   }
   if (!user || !user.active) throw new ApiError('로그인이 필요합니다.', 'UNAUTHORIZED');
+  // 업체 주소별 로그인: 이 탭의 업체(예: /filelike)가 아닌 다른 업체 계정이면 로그인 안 된 것으로 (업체끼리 섞이지 않게)
+  const co = requestCompany();
+  if (co && user.role === ROLES.SUPER) throw new ApiError('로그인이 필요합니다.', 'UNAUTHORIZED'); // 운영자 로그인은 업체 화면에 쓰지 않음 (운영자는 / · /admin)
+  if (co) {
+    const mine = db.companies.find((c) => c.id === user.companyId);
+    if (mine && mine.code && mine.code !== co) throw new ApiError('로그인이 필요합니다.', 'UNAUTHORIZED');
+  }
   const err = companyAccessError(db, user);
   if (err) throw new ApiError(err, 'UNAUTHORIZED');
   return { db, user };
@@ -130,4 +138,15 @@ export const ownsContract = (user, c) => !isOwnScopeOnly(user) || c.ownerId === 
 
 export function companyOf(db, user) {
   return db.companies.find((c) => c.id === user.companyId);
+}
+
+// 업체별 기능 스위치 — 꺼진 기능이면 막음 (운영자는 업체가 없으므로 통과)
+export function requireFeature(db, userOrCompanyId, key) {
+  const companyId = typeof userOrCompanyId === 'object' ? userOrCompanyId?.companyId : userOrCompanyId;
+  if (!companyId) return;
+  const company = db.companies.find((c) => c.id === companyId);
+  if (!hasFeature(company, key)) {
+    const label = FEATURES.find((f) => f.key === key)?.label || key;
+    throw new ApiError(`이 업체는 '${label}' 기능을 쓰지 않습니다.`, 'FORBIDDEN');
+  }
 }

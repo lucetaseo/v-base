@@ -8,7 +8,7 @@ import {
   teams as teamApi,
 } from '../api/index.js';
 import { useAuth } from '../auth/AuthContext.jsx';
-import { ASSIGN_TYPES, CATEGORIES, DEFAULT_SCHEDULE_SETTINGS, OFF_LABEL, WORK_STATUS } from '../constants.js';
+import { ASSIGN_TYPES, currentCategories, currentHasFeature, DEFAULT_SCHEDULE_SETTINGS, OFF_LABEL, WORK_STATUS } from '../constants.js';
 import { calcAmounts, offBlocks, slotOf, teamOffStatus, timeFieldsOf, timeLabel, timeOptions, timeValueOf } from '../utils/contract.js';
 import { WEEKDAYS, formatKoreanDate, toDateKey, today } from '../utils/date.js';
 import { formatAddress, won } from '../utils/format.js';
@@ -22,13 +22,25 @@ import { backdrop } from '../utils/backdrop.js';
 import { navigateForward } from '../router.js';
 import { useRefreshOnReturn } from '../utils/useRefreshOnReturn.js';
 
-const CATEGORY_SHORT = { 청소: '청', 줄눈: '줄', 나노코팅: '나', 탄성: '탄', 페인트: '페', 기타: '기' };
+const CATEGORY_SHORT = { 청소: '청', 줄눈: '줄', 나노코팅: '나', 탄성: '탄', 새집증후군: '새', 페인트: '페', 기타: '기' };
 const short = (category) => (CATEGORY_SHORT[category] ? `${CATEGORY_SHORT[category]})` : '');
 // 이름 앞에 이미 "줄)"·"탄,줄)" 같은 표시가 있으면 구분 표시를 또 붙이지 않음 ("줄)줄)공두환" 방지)
 const HAS_PREFIX = /^[가-힣,]+\)/;
 const withShort = (category, name) => (HAS_PREFIX.test(name || '') ? name : `${short(category)}${name}`);
 
 const FAIR_ONLY = '__fair'; // 첫 칸 '박람회' (박람회 일정만 보기)
+
+// 고른 거르기(구분·기사·상태)는 이 탭에서 기억 — 배정하러 계약 화면에 갔다 와도 '전체'로 풀리지 않게
+const FILTER_KEY = 'vb.scheduleFilter';
+const EMPTY_FILTER = { category: '', engineerId: '', status: '', view: '' };
+function savedFilter() {
+  try {
+    const v = JSON.parse(window.sessionStorage.getItem(FILTER_KEY) || 'null');
+    return v && typeof v === 'object' ? { ...EMPTY_FILTER, ...v } : null;
+  } catch {
+    return null;
+  }
+}
 
 export default function ScheduleManagement() {
   const { company, can, handleError } = useAuth();
@@ -47,7 +59,14 @@ export default function ScheduleManagement() {
   const [fairEdit, setFairEdit] = useState(null); // { fair } 또는 { date } — 박람회 팝업
   const [engineers, setEngineers] = useState([]);
   const [crewTeams, setCrewTeams] = useState([]);
-  const [filter, setFilter] = useState({ category: '', engineerId: '', status: '', view: '' });
+  const [filter, setFilter] = useState(() => ({ ...EMPTY_FILTER, ...(saved?.filter || savedFilter() || {}) }));
+  useEffect(() => {
+    try {
+      window.sessionStorage.setItem(FILTER_KEY, JSON.stringify(filter));
+    } catch {
+      // 저장이 막힌 브라우저(사생활 보호 모드 등)는 기억만 못 함
+    }
+  }, [filter]);
 
   const [editItem, setEditItem] = useState(null);
   const [notifyItem, setNotifyItem] = useState(null);
@@ -157,7 +176,7 @@ export default function ScheduleManagement() {
   const canEditContract = can('contract.edit');
   const editSchedule = (row) => {
     if (canEditContract) {
-      window.history.replaceState({ ...window.history.state, schedule: { year, month, selectedDate } }, '');
+      window.history.replaceState({ ...window.history.state, schedule: { year, month, selectedDate, filter } }, '');
       navigateForward(`/contracts/${row.contract.id}/edit`);
       return;
     }
@@ -267,7 +286,7 @@ export default function ScheduleManagement() {
       <div className="page-header">
         <h2>기사일정관리</h2>
         <ul className="notice-list">
-          <li>계약서에 입력된 시공일정(1~3차)과 배정 기사, 기사 휴무가 날짜별로 표시됩니다.</li>
+          <li>계약서에 입력된 시공일정(1~4차)과 배정 기사, 기사 휴무가 날짜별로 표시됩니다.</li>
           <li>날짜를 클릭하면 우측에 상세 일정이 표시되며, 일정/기사 변경은 계약서에 바로 반영됩니다.</li>
           {canEdit && <li>상세 일정의 시공자 칸을 누르면 수정 화면 없이 바로 기사를 바꿀 수 있습니다.</li>}
           <li>
@@ -280,8 +299,8 @@ export default function ScheduleManagement() {
       <div className="schedule-filter-bar">
         <select className="schedule-select" value={filter.category} onChange={(e) => setFilter({ ...filter, category: e.target.value })}>
           <option value="">전체</option>
-          {CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
-          <option value={FAIR_ONLY}>박람회</option>
+          {currentCategories().map((c) => <option key={c} value={c}>{c}</option>)}
+          {currentHasFeature('fair') && <option value={FAIR_ONLY}>박람회</option>}
         </select>
         <select className="schedule-select" value={filter.engineerId} onChange={(e) => setFilter({ ...filter, engineerId: e.target.value })}>
           <option value="">기사선택</option>
@@ -515,7 +534,7 @@ export default function ScheduleManagement() {
                         {showAmount && <td className="text-right">{row.contract.amountHidden ? '-' : won(calcAmounts(row.contract).balance)}</td>}
                         <td>
                           <div className="row-actions">
-                            {(
+                            {currentHasFeature('alimtalk') && (
                               <button type="button" className="btn-talk-yellow" title="담당기사 알림톡" onClick={() => setNotifyItem(row)}>
                                 💬
                               </button>

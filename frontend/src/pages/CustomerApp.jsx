@@ -9,7 +9,7 @@ import { navigate } from '../router.js';
 // 고객모바일 (/{업체}/c, 알림톡 링크 /{업체}/c/{고유값})
 //   - 링크로 들어오면 입력 없이 바로 로그인
 //   - 직접 들어오면 이름 + 휴대폰번호 (아이디저장 / 자동로그인은 이 기기에만 저장)
-const CIRCLED = ['①', '②', '③'];
+const CIRCLED = ['①', '②', '③', '④'];
 const memKey = (code) => `vb.customer.${code}`;
 const readMem = (code) => {
   try {

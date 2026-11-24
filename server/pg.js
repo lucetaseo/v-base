@@ -1,5 +1,8 @@
 // PostgreSQL 연결 + 데이터 읽기/쓰기
 import pg from 'pg';
+import { randomBytes } from 'node:crypto';
+import { photoStoreConfigured, uploadPhoto } from './photoStore.js';
+import { hasFeature } from '../frontend/src/constants.js';
 
 const TABLE_MAP = {
   companies: 'companies',
@@ -13,12 +16,13 @@ const TABLE_MAP = {
   contracts: 'contracts',
   notifications: 'notifications',
   paymentReceipts: 'payment_receipts',
-  purchases: 'purchases',
-  stocks: 'stocks',
+  callLogs: 'call_logs',
+  purchases: 'purchases', // 매입 (통계정보 > 매입관리)
+  stocks: 'stocks', // 재고 품목 + 입출고 기록 (통계정보 > 재고체크)
 };
 export const TABLE_KEYS = Object.keys(TABLE_MAP);
 // 업체별로 나뉘는 테이블 (요청한 사람의 업체 데이터만 읽음)
-const COMPANY_SCOPED = ['engineerOffs', 'teams', 'products', 'apartments', 'customers', 'contracts', 'notifications', 'paymentReceipts', 'purchases', 'stocks'];
+const COMPANY_SCOPED = ['engineerOffs', 'teams', 'products', 'apartments', 'customers', 'contracts', 'notifications', 'paymentReceipts', 'callLogs', 'purchases', 'stocks'];
 // 영수증 사진은 용량이 커서 기본으로 읽지 않음 (scope.receiptsFor 로 해당 계약 것만)
 const HEAVY = ['paymentReceipts'];
 
@@ -64,6 +68,7 @@ const SLIM_DROP = ['history', 'memo', 'happyCallMemo', 'notes', 'engineerNote', 
 export async function loadSnapshot(client, scope) {
   const db = { seq: {}, version: 2 };
   const readOnly = new Set();
+  let slimIds = null; // 가볍게 읽은 계약 번호들 (scope.focusContracts)
   const meta = await rows(client, `SELECT key, value FROM meta WHERE key IN ('seq','schema_version')`);
   meta.forEach((m) => {
     if (m.key === 'seq') db.seq = m.value;
@@ -89,6 +94,19 @@ export async function loadSnapshot(client, scope) {
     } else if (scope.companyId && wanted.includes(key)) {
       // 목록 요청(읽기 전용)은 계약의 긴 글·변경이력을 DB 에서 아예 읽지 않음
       const cols = key === 'contracts' && scope.slimContracts ? `data ${SLIM_DROP}` : 'data';
+      if (key === 'contracts' && scope.focusContracts) {
+        // 계약 하나를 보거나 고칠 때: 그 계약만 전체, 나머지는 긴 글·변경이력 없이 (번호·묶음 계산에 필요한 값은 그대로)
+        const focus = scope.focusContracts.filter((x) => Number.isSafeInteger(x));
+        const got = await rows(
+          client,
+          `SELECT id, (id = ANY($2::bigint[])) AS full, CASE WHEN id = ANY($2::bigint[]) THEN data ELSE data ${SLIM_DROP} END AS data
+             FROM contracts WHERE company_id = $1 ORDER BY id`,
+          [scope.companyId, focus],
+        );
+        db.contracts = got.map(toObj);
+        slimIds = new Set(got.filter((r) => !r.full).map((r) => Number(r.id)));
+        continue;
+      }
       db[key] = (await rows(client, `SELECT ${cols} AS data FROM ${TABLE_MAP[key]} WHERE company_id = $1 ORDER BY id`, [scope.companyId])).map(toObj);
     } else {
       db[key] = [];
@@ -97,9 +115,34 @@ export async function loadSnapshot(client, scope) {
   }
   // 수정 로그 화면: 이 업체의 최근 기록 (읽기 전용)
   if (scope.auditLogs && scope.companyId) {
+    // 되돌리기용 이전·이후 자료(undo)는 크므로 목록에서는 빼고 '있음'만
     db.auditLogs = (
-      await rows(client, `SELECT id, created_at, data FROM audit_logs WHERE company_id = $1 ORDER BY created_at DESC, id DESC LIMIT 3000`, [scope.companyId])
+      await rows(
+        client,
+        `SELECT id, created_at, data - 'undo' AS data, (data ? 'undo') AS has_undo FROM audit_logs WHERE company_id = $1 ORDER BY created_at DESC, id DESC LIMIT 3000`,
+        [scope.companyId],
+      )
+    ).map((r) => ({ ...r.data, hasUndo: !!r.has_undo, id: Number(r.id), at: new Date(r.created_at).toISOString() }));
+  }
+  // 되돌리기: 그 기록 하나(전체) + 그 기록을 되돌린 기록
+  if (scope.auditLogId && scope.companyId) {
+    db.auditLogs = (
+      await rows(
+        client,
+        `SELECT id, created_at, CASE WHEN id = $2 THEN data ELSE data - 'undo' END AS data FROM audit_logs
+          WHERE company_id = $1 AND (id = $2 OR data->>'undoOf' = $3)`,
+        [scope.companyId, scope.auditLogId, String(scope.auditLogId)],
+      )
     ).map((r) => ({ ...r.data, id: Number(r.id), at: new Date(r.created_at).toISOString() }));
+    // 사진(영수증 등)은 평소에 읽지 않는 표 → 이 기록이 바꾼 사진만 읽어 둠 (되돌릴 때 비교·복구)
+    const target = db.auditLogs.find((r) => r.id === scope.auditLogId);
+    const photoIds = (target?.undo || []).filter((x) => x.table === 'paymentReceipts').map((x) => Number(x.id));
+    if (photoIds.length) {
+      db.paymentReceipts = (
+        await rows(client, `SELECT data FROM payment_receipts WHERE company_id = $1 AND id = ANY($2::bigint[]) ORDER BY id`, [scope.companyId, photoIds])
+      ).map(toObj);
+      readOnly.delete('paymentReceipts');
+    }
   }
   // 목록 변경 확인(listCached): 계약 전체 대신 담당자별 건수·마지막 수정·번호 합만 (트래픽 절약)
   //   COLLATE "C" — 시각 문자열을 화면 코드(자바스크립트)와 같은 글자 순서로 비교
@@ -128,7 +171,7 @@ export async function loadSnapshot(client, scope) {
     }));
     readOnly.add('contracts');
   }
-  return { db, readOnly };
+  return { db, readOnly, slimIds };
 }
 
 // 계약의 서명 이미지는 별도 표에 저장 → 계약 데이터에서는 떼어냄
@@ -140,6 +183,19 @@ function splitSignature(row) {
 
 // 변경된 행만 저장 (추가/수정/삭제)
 // 저장 전 상태의 '지문'만 만들어 둠 (전체 복사 대신 행마다 JSON 글자 하나) → 쓰기 요청이 가벼워짐
+// 가볍게 읽은 계약을 업무 코드가 바꾸거나 지웠는지 (그러면 전체를 다시 읽어 처음부터 — 빠진 항목이 지워지지 않게)
+export function touchedSlim(fp, after, slimIds) {
+  if (!slimIds?.size) return false;
+  const prev = fp.contracts.rows;
+  let seen = 0;
+  for (const r of after.contracts || []) {
+    if (!slimIds.has(r.id)) continue;
+    seen++;
+    if (JSON.stringify(r) !== prev.get(r.id)) return true;
+  }
+  return seen !== slimIds.size;
+}
+
 export function fingerprint(db) {
   const fp = { __fingerprint: true };
   for (const key of TABLE_KEYS) {
@@ -157,7 +213,8 @@ export function fingerprint(db) {
 }
 
 // 반환: 바뀐 행 목록 [{ table, before(이전 JSON 문자열 | null), after(행 | null) }] — 수정 로그용
-export async function persistChanges(client, before, after, readOnly) {
+//   seqWrite: 저장할 번호표 (handler 가 다른 업체 번호와 합친 값, null = 저장 안 함, 없으면 예전처럼 비교해서)
+export async function persistChanges(client, before, after, readOnly, seqWrite) {
   const fp = before && before.__fingerprint ? before : fingerprint(before);
   const changes = [];
   for (const key of TABLE_KEYS) {
@@ -187,6 +244,21 @@ export async function persistChanges(client, before, after, readOnly) {
       companyIds.push(key === 'companies' ? row.id : row.companyId ?? null);
       datas.push(json);
     }
+    // 새 사진은 사진 전용 저장소로 (업체 스위치·설정이 있을 때) — DB·수정로그에는 'vbstore:경로' 만
+    if (key === 'paymentReceipts' && photoStoreConfigured()) {
+      await Promise.all(
+        changes.map(async (ch) => {
+          if (ch.table !== key || !ch.after || !String(ch.after.image || '').startsWith('data:')) return;
+          if (!hasFeature(after.companies?.find((c) => c.id === ch.after.companyId), 'photoStorage')) return;
+          const ext = /^data:image\/(png|webp)/.exec(ch.after.image)?.[1] || 'jpg';
+          const path = `${ch.after.companyId}/${ch.after.contractId || 0}/${ch.after.id}-${randomBytes(6).toString('hex')}.${ext}`;
+          const stored = await uploadPhoto(ch.after.image, path);
+          if (!stored) return;
+          ch.after = { ...ch.after, image: stored };
+          datas[ids.indexOf(ch.after.id)] = JSON.stringify(ch.after);
+        }),
+      );
+    }
     // 바뀐 행을 표마다 한 번에 저장 (DB 가 멀어도 왕복 횟수가 적도록)
     for (let i = 0; i < ids.length; i += 500) {
       await client.query(
@@ -203,10 +275,11 @@ export async function persistChanges(client, before, after, readOnly) {
       if (isContracts) await client.query(`DELETE FROM contract_signatures WHERE contract_id = ANY($1::bigint[])`, [removed]);
     }
   }
-  if (JSON.stringify(before.seq) !== JSON.stringify(after.seq)) {
+  const seq = seqWrite !== undefined ? seqWrite : JSON.stringify(before.seq) !== JSON.stringify(after.seq) ? after.seq : null;
+  if (seq) {
     await client.query(
       `INSERT INTO meta (key, value) VALUES ('seq', $1) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
-      [JSON.stringify(after.seq)],
+      [JSON.stringify(seq)],
     );
   }
   return changes;
