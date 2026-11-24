@@ -131,6 +131,7 @@ function normalizeSchedules(db, user, input = [], prev = []) {
       reportedBy: old.reportedBy || '',
       ...(old.workRecord ? { workRecord: old.workRecord } : {}), // 기사 시공 기록도 기사만 변경
       ...(old.photoCount ? { photoCount: old.photoCount } : {}), // 시공 사진 장수 (사진은 따로 저장 — stepPhotos.js)
+      ...(old.photosArchived ? { photosArchived: old.photosArchived } : {}), // 시공 사진 정리(내려받아 지움) 기록
     };
   });
   if (!out.length) out.push(normalizeSchedules(db, user, [{}])[0]);

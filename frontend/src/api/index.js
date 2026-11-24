@@ -40,4 +40,5 @@ export const {
   customerApp,
   auditLogs,
   companyFiles,
+  photoArchive,
 } = impl;

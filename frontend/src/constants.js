@@ -5,8 +5,14 @@ export const BRANDS = ['더좋은집', '더스타트'];
 // 구분 (품목)
 // v-base 기본 구분 (신화탄성 때부터: 탄성 먼저, 페인트 있음, 새집증후군 없음) — 업체마다 운영자가 바꿀 수 있음
 export const CATEGORIES = ['탄성', '줄눈', '청소', '나노코팅', '페인트', '기타'];
-// 새 업체 등록 때 처음 들어가는 시공 구분 (아르떼: 조명업체) — 운영자 화면에서 바로 고칠 수 있음
-export const LIGHTING_CATEGORIES = ['조명설치', '조명교체', '간접조명', '배선공사', '기타'];
+// 새 업체 등록 때 처음 들어가는 시공 구분 (아르떼: 조명업체 — 목수팀·전선팀·조명팀이 나눠 작업) — 운영자 화면에서 바로 고칠 수 있음
+export const LIGHTING_CATEGORIES = ['조명', '목공', '전선', '기타'];
+// 조명 구분으로 등록한 새 업체에 처음 만들어 두는 시공팀 (팀관리에서 바꾸거나 지울 수 있음)
+export const LIGHTING_TEAMS = [
+  { name: '목수팀', description: '천장·벽 목공 (조명 자리·간접조명 박스)' },
+  { name: '전선팀', description: '배선·전기 공사' },
+  { name: '조명팀', description: '조명 설치·교체' },
+];
 
 // ---------------- 신화탄성 탄성·페인트 계약서 (기능 paintContract, 업체 전용) ----------------
 // 제품별 시공장소 체크, 품질보증, 구역 / 곰팡이방지 살균시공 / AS 보장범위 / 시공후기 페이백
@@ -66,6 +72,7 @@ export const FEATURES = [
   { key: 'paintContract', label: '신화탄성 탄성·페인트 계약서 (시공장소·품질보증·구역, 곰팡이방지·AS보장·후기 페이백, 업체 정보 칸)', on: true },
   { key: 'photoStorage', label: '사진 전용 저장소 (새 사진을 DB 대신 사진 저장소에)', on: true },
   { key: 'stepPhotos', label: '시공 사진 (시공 1~4차 회차마다 사진 올리기 · 기사모바일·계약 상세)', on: true },
+  { key: 'photoArchive', label: '시공 사진 정리 (기간별로 ZIP 내려받은 뒤 서버에서 지우기 — 관리자)', on: true },
   { key: 'callLog', label: '상담내역 메뉴 (전화번호별 통화 메모 · 번호 검색)', on: true },
   { key: 'scheduleLock', label: '시공일자·기사배정은 권한 있는 사람만 (권한 없으면 계약 등록에서 시공 칸 숨김)', on: true },
 ];

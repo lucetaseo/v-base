@@ -2392,3 +2392,69 @@ test('시공 사진 (회차별, 기능 stepPhotos): 1~4차, 사무실·배정 �
   assert.equal((await eng('engineerApp', 'addStepPhotos', c.id, 1, [img('x')])).status, 403);
   await sup.ok('companies', 'update', good.id, { features: {} });
 });
+
+test('시공 사진 정리 (photoArchive): 관리자만, 시공일 기간으로 대상 확인 → 사진 받기 → 정리(지움), 정리 기록 남김, 기간 밖은 그대로', async () => {
+  const admin = client();
+  await admin.ok('auth', 'login', 'admin', 'admin1234');
+  const img = (t) => 'data:image/jpeg;base64,' + Buffer.from(`archive-${t}`).toString('base64');
+  const c = await admin.ok('contracts', 'create', {
+    ...base,
+    customerName: '정리고객',
+    customerPhone: '010-6161-7171',
+    schedules: [
+      { date: '2025-03-10', time: '09:00', assignType: 'engineer' },
+      { date: '2025-09-10', time: '09:00', assignType: 'engineer' },
+    ],
+  });
+  await admin.ok('contracts', 'addStepPhotos', c.id, 0, [img(1), img(2), img(3)]);
+  await admin.ok('contracts', 'addStepPhotos', c.id, 1, [img(4)]);
+  const range = { from: '2025-01-01', to: '2025-06-30' };
+
+  const sum = await admin.ok('photoArchive', 'summary', range);
+  const mine = sum.contracts.find((x) => x.id === c.id);
+  assert.deepEqual(mine.steps.map((s) => [s.stepIndex, s.photoCount]), [[0, 3]], '기간 안 회차(①)만 대상');
+  assert.equal((await admin('photoArchive', 'summary', { from: '2025-07-01', to: '2025-01-01' })).status, 400, '기간이 거꾸로면 거부');
+
+  const got = await admin.ok('photoArchive', 'photos', [c.id], range);
+  assert.equal(got[0].photos.length, 3);
+  assert.ok(got[0].photos.every((p) => p.stepIndex === 0 && p.image.startsWith('data:image/')), '사진 내용까지 받음');
+  assert.equal((await admin('photoArchive', 'photos', [1, 2, 3, 4, 5, 6], range)).status, 400, '한 번에 계약 5건까지');
+
+  await admin.ok('users', 'create', { role: 'MANAGER', loginId: 'arcmgr', password: 'arc12345', name: '정리못하는실장', permissions: ['contract.view', 'contract.edit'], dataScope: 'all' });
+  const mgr = client();
+  await mgr.ok('auth', 'login', 'arcmgr', 'arc12345');
+  assert.equal((await mgr('photoArchive', 'summary', range)).status, 403, '실장은 정리 불가 (관리자만)');
+
+  assert.equal((await admin.ok('photoArchive', 'purge', [c.id], range)).removed, 3);
+  const after = await admin.ok('contracts', 'get', c.id);
+  assert.equal(after.schedules[0].photoCount, 0);
+  assert.equal(after.schedules[0].photosArchived.count, 3, '정리 기록 (몇 장·언제)');
+  assert.equal(after.schedules[1].photoCount, 1, '기간 밖 회차(②)는 그대로');
+  assert.equal((await admin.ok('contracts', 'stepPhotos', c.id)).length, 1);
+  assert.ok(after.history.some((h) => h.action === '시공 사진 정리'), '변경이력');
+  await admin.ok('contracts', 'update', c.id, { ...after, memo: '정리 뒤 수정' });
+  assert.equal((await admin.ok('contracts', 'get', c.id)).schedules[0].photosArchived.count, 3, '계약을 고쳐도 정리 기록 유지');
+
+  const sup = client();
+  await sup.ok('auth', 'login', 'super', 'super-test-1234');
+  const good = (await sup.ok('companies', 'list')).find((x) => x.code === 'thegood');
+  await sup.ok('companies', 'update', good.id, { features: { photoArchive: false } });
+  assert.equal((await admin('photoArchive', 'summary', range)).status, 403, '기능을 끈 업체는 불가');
+  await sup.ok('companies', 'update', good.id, { features: {} });
+});
+
+test('조명 구분으로 새 업체 등록 + 팀관리 [목수팀·전선팀·조명팀 넣기] (아르떼): 시공팀으로, 다시 눌러도 중복 없음', async () => {
+  const sup = client();
+  await sup.ok('auth', 'login', 'super', 'super-test-1234');
+  const arte = await sup.ok('companies', 'create', {
+    company: { code: 'arte', name: '아르떼', categories: ['조명', '목공', '전선', '기타'], periodStart: '2026-01-01', periodEnd: '2027-12-31' },
+    admin: { loginId: 'arteadmin', password: 'arte12345', name: '아르떼관리자' },
+  });
+  assert.deepEqual(arte.categories, ['조명', '목공', '전선', '기타']);
+  const a = client();
+  await a.ok('auth', 'login', 'arteadmin', 'arte12345', 'arte');
+  assert.deepEqual((await a.ok('teams', 'addLightingTeams')).added, ['목수팀', '전선팀', '조명팀']);
+  assert.deepEqual((await a.ok('teams', 'addLightingTeams')).added, [], '다시 눌러도 중복 없음');
+  const teams = await a.ok('teams', 'list');
+  assert.deepEqual(teams.filter((t) => t.kind === '시공팀').map((t) => t.name).sort(), ['목수팀', '전선팀', '조명팀']);
+});

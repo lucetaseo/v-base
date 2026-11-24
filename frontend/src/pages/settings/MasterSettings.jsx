@@ -337,16 +337,35 @@ export function EngineerSettings({ path = '' }) {
 }
 
 export function TeamSettings() {
+  const { handleError } = useAuth();
   return (
     <MasterPage
       title="팀 관리"
       notices={[
-        '부서(상담팀/박람회팀 등)와 시공팀(스마일팀 등)을 관리합니다.',
+        '부서(상담팀/박람회팀 등)와 시공팀(예: 목수팀·전선팀·조명팀)을 관리합니다.',
         '부서는 사용자관리에서 직원에게, 시공팀은 기사관리에서 기사에게 지정하며 계약서의 [팀배정]에 사용됩니다.',
       ]}
       api={teams}
       searchKeys={['name', 'description']}
       emptyForm={{ name: '', kind: '부서', description: '' }}
+      extraActions={(reload) => (
+        <button
+          type="button"
+          className="btn-add-customer outline"
+          title="조명업체용 시공팀 예시: 목수팀·전선팀·조명팀 (이미 있는 팀은 건너뜀)"
+          onClick={async () => {
+            try {
+              const r = await teams.addLightingTeams();
+              alert(r.added.length ? `${r.added.join(', ')}을(를) 시공팀으로 추가했습니다.` : '목수팀·전선팀·조명팀이 이미 모두 있습니다.');
+              reload();
+            } catch (e) {
+              handleError(e);
+            }
+          }}
+        >
+          + 목수팀·전선팀·조명팀 넣기
+        </button>
+      )}
       removeConfirm={(r) => `[${r.name}] 팀을 삭제하시겠습니까?\n소속된 사용자는 '팀 없음'으로 변경됩니다.`}
       columns={[
         { key: 'name', label: '팀명', className: 'bold-text' },

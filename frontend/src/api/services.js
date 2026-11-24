@@ -23,7 +23,7 @@ import {
 } from './runtime.js';
 import { ROLES, DATA_SCOPES, permissionsOf, isOwnScopeOnly, ALL_PERMISSION_KEYS, can } from '../auth/permissions.js';
 import { digitsOnly, formatPhone } from '../utils/format.js';
-import { CATEGORIES, COMPANY_DOC_FIELDS, DEPARTMENTS, brandTerms, companyCategories, hasFeature, parseCategories, parseFeatures, purchaseCategories, termsSource } from '../constants.js';
+import { CATEGORIES, COMPANY_DOC_FIELDS, LIGHTING_TEAMS, DEPARTMENTS, brandTerms, companyCategories, hasFeature, parseCategories, parseFeatures, purchaseCategories, termsSource } from '../constants.js';
 import { today } from '../utils/date.js';
 import { AUDIT_KEEP_DAYS, UNDO_KEEP, auditText, skipAudit, undoComparable } from './audit.js';
 import { addHistory } from './views.js';
@@ -46,6 +46,7 @@ import {
 export { ApiError } from './core.js';
 export { contracts, esign, notifications, reports, imports, customerApp } from './contracts.js';
 export { companyFiles } from './files.js';
+export { photoArchive } from './photoArchive.js';
 export { schedules, engineerOffs, engineerApp, scheduleSettings, fairs } from './schedule.js';
 
 // ============================================================
@@ -558,7 +559,7 @@ export const engineers = masterTable('engineers', {
   },
 });
 
-export const teams = masterTable('teams', {
+const teamTable = masterTable('teams', {
   normalize: (d) => ({
     name: required(d.name, '팀 이름을 입력해 주세요.'),
     kind: d.kind === '시공팀' ? '시공팀' : '부서', // 시공팀은 계약서 '팀배정'에 사용
@@ -576,6 +577,19 @@ export const teams = masterTable('teams', {
     return true;
   },
 });
+
+// 팀관리: 기본 목록·저장·삭제 + [목수팀·전선팀·조명팀 넣기] (조명업체 아르떼 — 이미 있는 이름은 건너뜀)
+export const teams = {
+  ...teamTable,
+  async addLightingTeams() {
+    const { db, user } = await authorize('settings.manage');
+    const have = new Set(db.teams.filter((t) => t.companyId === user.companyId).map((t) => t.name.replace(/\s+/g, '')));
+    const added = LIGHTING_TEAMS.filter((t) => !have.has(t.name));
+    added.forEach((t) => db.teams.push({ id: nextId(db, 'teams'), companyId: user.companyId, createdAt: nowIso(), name: t.name, kind: '시공팀', description: t.description }));
+    saveDb(db);
+    return { added: added.map((t) => t.name) };
+  },
+};
 
 export const products = masterTable('products', {
   normalize: (d) => ({
