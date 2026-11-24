@@ -2572,6 +2572,27 @@ test('시공 도면 (drawings): 층별 도면 그림 + 조명 아이콘 저장·
   const moved = (await admin.ok('contracts', 'drawings', c.id))[0];
   assert.deepEqual([moved.icons[0].x, moved.icons[0].y], [70, 20]);
   assert.equal(moved.imageId, list[0].imageId, '그림은 그대로');
+  // 도형·선·글자: 모르는 종류는 빠지고, 위치 0~100, 색은 정해진 것만, 빈 글자는 빠짐, 아이콘만 저장하면 도형 그대로
+  await admin.ok('contracts', 'saveDrawing', c.id, {
+    drawingId: id,
+    icons: moved.icons,
+    shapes: [
+      { id: 's1', kind: 'rect', x: 10, y: 10, x2: 120, y2: 30, color: '#2563eb', size: 4, fill: true },
+      { id: 's2', kind: 'arrow', x: 5, y: 5, x2: 50, y2: 50, color: 'red', size: 99 },
+      { id: 's3', kind: 'text', x: 40, y: 60, text: '거실 높이 2.4m' },
+      { id: 's4', kind: 'text', x: 1, y: 1, text: '   ' },
+      { id: 's5', kind: 'star', x: 1, y: 1 },
+      { id: 's6', kind: 'line', x: 1, y: 1, x2: 2, y2: 2, fill: true },
+    ],
+  });
+  const sh = (await admin.ok('contracts', 'drawings', c.id))[0].shapes;
+  assert.deepEqual(sh.map((x) => x.id), ['s1', 's2', 's3', 's6']);
+  assert.deepEqual([sh[0].x2, sh[0].color, sh[0].size, sh[0].fill], [100, '#2563eb', 4, true]);
+  assert.deepEqual([sh[1].color, sh[1].size], ['#ef4444', 8], '모르는 색 → 기본 색, 굵기 1~8');
+  assert.equal(sh[2].text, '거실 높이 2.4m');
+  assert.equal(sh[3].fill, false, '선은 칠하기 없음');
+  await admin.ok('contracts', 'saveDrawing', c.id, { drawingId: id, icons: moved.icons });
+  assert.equal((await admin.ok('contracts', 'drawings', c.id))[0].shapes.length, 4, '아이콘만 저장하면 도형 그대로');
   // 2층 추가 → 목록(가벼운 계약)에는 도면이 없음
   await admin.ok('contracts', 'saveDrawing', c.id, { name: '2층', image: img, icons: [{ type: 'pendant', x: 1, y: 1 }] });
   assert.equal((await admin.ok('contracts', 'drawings', c.id)).length, 2);
@@ -2630,6 +2651,7 @@ test('고객 도면 보기 (customerDrawings): 제품 사양·사진 → 고객�
   assert.equal(d.drawings.length, 1);
   assert.equal(d.drawings[0].image, img);
   assert.equal(d.drawings[0].icons[0].note, undefined, '사무실 메모는 고객에게 안 보임');
+  assert.deepEqual(d.drawings[0].shapes, [], '도형 칸은 항상 있음');
   assert.deepEqual(d.lines[0], { name: prod.name, qty: 4, detail: '', spec: '3인치 LED 6W · 4000K', photo });
   assert.equal(d.lines[1].photo, '');
   // 다른 고객의 계약은 불가

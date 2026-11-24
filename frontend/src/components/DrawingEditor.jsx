@@ -4,7 +4,8 @@ import { PLAN_ACCEPT, planPages } from '../utils/planFile.js';
 
 // 시공 도면 (계약 상세 > 시공관리, 기능 drawings) — 아르떼(조명)
 //   층별 도면(그림) 위에 조명 아이콘을 놓고(누르기) · 옮기고(끌기) · 지우기, 확대·축소, 범례, 계약 상품 줄과 연결
-//   api: { list(), save({ drawingId, name, image, w, h, icons }), remove(drawingId) }
+//   api: { list(), save({ drawingId, name, image, w, h, icons, shapes }), remove(drawingId) }
+//   도형·선·글자(shapes): 사각형·원·선·화살표·글자 — 끌어서 그리고, 고르면 양 끝 손잡이로 크기 조절, 끌어서 옮김
 //   lines: 계약 상품 줄 (아이콘 ↔ 제품 연결, 범례에서 계약 수량과 비교)
 //   canEdit: false 면 보기만 (아이콘을 누르면 설명)
 //   renderInfo(icon, line): 보기 전용에서 아이콘을 눌렀을 때 보일 내용 (고객 화면: 제품 사진·사양 카드)
@@ -23,6 +24,17 @@ export const ICONS = {
   etc: { label: '기타', short: '?', color: '#94a3b8' },
 };
 const TYPES = Object.keys(ICONS);
+
+// 도형·선·글자 (api/drawings.js SHAPE_KINDS·SHAPE_COLORS 와 같게)
+export const SHAPES = {
+  rect: { label: '사각형', mark: '▭' },
+  ellipse: { label: '원', mark: '◯' },
+  line: { label: '선', mark: '／' },
+  arrow: { label: '화살표', mark: '→' },
+  text: { label: '글자', mark: 'T' },
+};
+const SHAPE_COLORS = ['#ef4444', '#2563eb', '#16a34a', '#111827', '#f59e0b', '#9333ea'];
+const isShapeTool = (t) => typeof t === 'string' && t.startsWith('shape:');
 
 export function DrawingIcon({ type, selected, title, onPointerDown, onClick, style }) {
   const ic = ICONS[type] || ICONS.etc;
@@ -47,6 +59,8 @@ export default function DrawingEditor({ api, lines = [], canEdit = false, onErro
   const [list, setList] = useState(null);
   const [activeId, setActiveId] = useState(null);
   const [icons, setIcons] = useState([]); // 고치는 중인 아이콘 (저장 전)
+  const [shapes, setShapes] = useState([]); // 고치는 중인 도형·선·글자 (저장 전)
+  const [pen, setPen] = useState({ color: SHAPE_COLORS[0], size: 3 }); // 새 도형 색·굵기
   const [dirty, setDirty] = useState(false);
   const [tool, setTool] = useState(null); // 놓을 아이콘 종류 (null = 선택·옮기기)
   const [toolLine, setToolLine] = useState(''); // 새 아이콘에 연결할 상품 줄
@@ -66,6 +80,7 @@ export default function DrawingEditor({ api, lines = [], canEdit = false, onErro
       const id = keep && l.some((d) => d.id === keep) ? keep : l[0]?.id ?? null;
       setActiveId(id);
       setIcons(l.find((d) => d.id === id)?.icons || []);
+      setShapes(l.find((d) => d.id === id)?.shapes || []);
       setDirty(false);
       setSel(null);
     } catch (e) {
@@ -76,11 +91,12 @@ export default function DrawingEditor({ api, lines = [], canEdit = false, onErro
     load();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const confirmLeave = () => !dirty || window.confirm('저장하지 않은 아이콘 변경이 있습니다. 버리고 넘어갈까요?');
+  const confirmLeave = () => !dirty || window.confirm('저장하지 않은 변경(아이콘·도형)이 있습니다. 버리고 넘어갈까요?');
   const pick = (d) => {
     if (d.id === activeId || !confirmLeave()) return;
     setActiveId(d.id);
     setIcons(d.icons || []);
+    setShapes(d.shapes || []);
     setDirty(false);
     setSel(null);
     setZoom(1);
@@ -121,7 +137,7 @@ export default function DrawingEditor({ api, lines = [], canEdit = false, onErro
     try {
       for (let i = 0; i < pages.length; i++) {
         setBusy(`도면 올리는 중 ${pages.length > 1 ? `${i + 1}/${pages.length}` : ''}`);
-        const r = await api.save({ name: name || `${(list?.length || 0) + i + 1}층`, ...(await readImage(pages[i].file)), icons: [] });
+        const r = await api.save({ name: name || `${(list?.length || 0) + i + 1}층`, ...(await readImage(pages[i].file)), icons: [], shapes: [] });
         lastId = r.drawing.id;
       }
     } catch (err) {
@@ -135,7 +151,7 @@ export default function DrawingEditor({ api, lines = [], canEdit = false, onErro
   const replaceWith = async (page) => {
     setBusy('그림 바꾸는 중...');
     try {
-      await api.save({ drawingId: active.id, ...(await readImage(page.file)), icons });
+      await api.save({ drawingId: active.id, ...(await readImage(page.file)), icons, shapes });
       await load(active.id);
     } catch (err) {
       onError?.(err);
@@ -177,7 +193,7 @@ export default function DrawingEditor({ api, lines = [], canEdit = false, onErro
     const name = window.prompt('도면 이름', active.name);
     if (name === null || !name.trim()) return;
     try {
-      await api.save({ drawingId: active.id, name, icons });
+      await api.save({ drawingId: active.id, name, icons, shapes });
       await load(active.id);
     } catch (err) {
       onError?.(err);
@@ -197,7 +213,7 @@ export default function DrawingEditor({ api, lines = [], canEdit = false, onErro
   const save = async () => {
     setBusy('저장하는 중...');
     try {
-      await api.save({ drawingId: active.id, icons });
+      await api.save({ drawingId: active.id, icons, shapes });
       await load(active.id);
     } catch (err) {
       onError?.(err);
@@ -218,12 +234,40 @@ export default function DrawingEditor({ api, lines = [], canEdit = false, onErro
     setDirty(true);
   };
 
+  const changeShapes = (next) => {
+    setShapes(next);
+    setDirty(true);
+  };
+
   const onBoardClick = (e) => {
     if (!canEdit || !tool || drag.current?.moved) return;
-    if (e.target.closest('.dwg-icon')) return;
+    if (e.target.closest('.dwg-icon') || e.target.closest('.dwg-shape')) return;
+    if (tool === 'shape:text') {
+      const text = window.prompt('넣을 글자 (예: 거실, 높이 2.4m)', '');
+      if (!text || !text.trim()) return;
+      const p = posOf(e);
+      const sh = { id: newId(), kind: 'text', x: p.x, y: p.y, x2: p.x, y2: p.y, text: text.trim().slice(0, 100), color: pen.color, size: pen.size, fill: false };
+      changeShapes([...shapes, sh]);
+      setSel(sh.id);
+      return;
+    }
+    if (isShapeTool(tool)) return; // 도형은 끌어서 그림 (onBoardDown)
     const ic = { id: newId(), type: tool, ...posOf(e), line: toolLine === '' ? null : Number(toolLine), note: '' };
     change([...icons, ic]);
     setSel(ic.id);
+  };
+
+  // 도형 그리기: 누른 자리에서 끈 자리까지
+  const onBoardDown = (e) => {
+    if (!canEdit || !isShapeTool(tool) || tool === 'shape:text') return;
+    if (e.target.closest('.dwg-icon') || e.target.closest('.dwg-shape')) return;
+    e.preventDefault();
+    const p = posOf(e);
+    const sh = { id: newId(), kind: tool.slice(6), x: p.x, y: p.y, x2: p.x, y2: p.y, text: '', color: pen.color, size: pen.size, fill: false };
+    setShapes((prev) => [...prev, sh]);
+    setSel(sh.id);
+    board.current.setPointerCapture?.(e.pointerId);
+    drag.current = { draw: sh.id, moved: false };
   };
 
   const onIconDown = (e, ic) => {
@@ -233,21 +277,60 @@ export default function DrawingEditor({ api, lines = [], canEdit = false, onErro
     e.currentTarget.setPointerCapture?.(e.pointerId);
     drag.current = { id: ic.id, moved: false };
   };
+  // 도형 옮기기(handle 없음) · 끝점 옮기기(handle 1: 시작, 2: 끝)
+  const onShapeDown = (e, sh, handle = 0) => {
+    e.stopPropagation();
+    setSel(sh.id);
+    if (!canEdit) return;
+    e.currentTarget.setPointerCapture?.(e.pointerId);
+    drag.current = { shape: sh.id, handle, start: posOf(e), orig: sh, moved: false };
+  };
   const onMove = (e) => {
-    if (!drag.current) return;
+    const d = drag.current;
+    if (!d) return;
     const { x, y } = posOf(e);
-    drag.current.moved = true;
-    setIcons((prev) => prev.map((ic) => (ic.id === drag.current.id ? { ...ic, x, y } : ic)));
+    d.moved = true;
+    if (d.draw) return setShapes((prev) => prev.map((sh) => (sh.id === d.draw ? { ...sh, x2: x, y2: y } : sh)));
+    if (d.shape) {
+      const o = d.orig;
+      const clamp = (v) => Math.min(100, Math.max(0, Math.round(v * 100) / 100));
+      let next;
+      if (d.handle === 1) next = { x, y };
+      else if (d.handle === 2) next = { x2: x, y2: y };
+      else {
+        const dx = x - d.start.x;
+        const dy = y - d.start.y;
+        next = { x: clamp(o.x + dx), y: clamp(o.y + dy), x2: clamp(o.x2 + dx), y2: clamp(o.y2 + dy) };
+      }
+      return setShapes((prev) => prev.map((sh) => (sh.id === d.shape ? { ...sh, ...next } : sh)));
+    }
+    setIcons((prev) => prev.map((ic) => (ic.id === d.id ? { ...ic, x, y } : ic)));
   };
   const onUp = () => {
-    if (drag.current?.moved) setDirty(true);
+    const d = drag.current;
+    if (d?.draw) {
+      // 거의 안 끌었으면 기본 크기로
+      setShapes((prev) =>
+        prev.map((sh) => {
+          if (sh.id !== d.draw || Math.abs(sh.x2 - sh.x) + Math.abs(sh.y2 - sh.y) > 1.5) return sh;
+          return { ...sh, x2: Math.min(100, sh.x + 10), y2: sh.kind === 'line' || sh.kind === 'arrow' ? sh.y : Math.min(100, sh.y + 7) };
+        }),
+      );
+      setDirty(true);
+    } else if (d?.moved) setDirty(true);
     setTimeout(() => (drag.current = null), 0);
   };
 
   const selected = icons.find((ic) => ic.id === sel) || null;
+  const selShape = shapes.find((sh) => sh.id === sel) || null;
   const setSelected = (patch) => change(icons.map((ic) => (ic.id === sel ? { ...ic, ...patch } : ic)));
+  const setSelShape = (patch) => {
+    changeShapes(shapes.map((sh) => (sh.id === sel ? { ...sh, ...patch } : sh)));
+    if (patch.color || patch.size) setPen((p) => ({ ...p, ...(patch.color ? { color: patch.color } : {}), ...(patch.size ? { size: patch.size } : {}) }));
+  };
   const removeSelected = () => {
-    change(icons.filter((ic) => ic.id !== sel));
+    if (selShape) changeShapes(shapes.filter((sh) => sh.id !== sel));
+    else change(icons.filter((ic) => ic.id !== sel));
     setSel(null);
   };
   useEffect(() => {
@@ -309,8 +392,26 @@ export default function DrawingEditor({ api, lines = [], canEdit = false, onErro
                   </button>
                 ))}
               </div>
+              <div className="dwg-palette dwg-shape-tools">
+                <span className="sub-text">도형·글자</span>
+                {Object.entries(SHAPES).map(([k, v]) => (
+                  <button key={k} type="button" className={`dwg-tool ${tool === `shape:${k}` ? 'active' : ''}`} onClick={() => setTool(`shape:${k}`)} title={k === 'text' ? '글자 넣기: 도면을 누르세요' : `${v.label} 그리기: 도면에서 끌어서 그리세요`}>
+                    <span className="dwg-shape-mark" style={{ color: pen.color }}>{v.mark}</span> {v.label}
+                  </button>
+                ))}
+                <span className="dwg-colors">
+                  {SHAPE_COLORS.map((c) => (
+                    <button key={c} type="button" className={pen.color === c ? 'on' : ''} style={{ background: c }} onClick={() => (selShape ? setSelShape({ color: c }) : setPen({ ...pen, color: c }))} title="색" />
+                  ))}
+                </span>
+                <select className="input-text" value={pen.size} onChange={(e) => (selShape ? setSelShape({ size: Number(e.target.value) }) : setPen({ ...pen, size: Number(e.target.value) }))} title="굵기·글자 크기">
+                  {[1, 2, 3, 4, 5, 6, 8].map((n) => (
+                    <option key={n} value={n}>굵기 {n}</option>
+                  ))}
+                </select>
+              </div>
               <div className="inline-fields">
-                {tool && (
+                {tool && !isShapeTool(tool) && (
                   <label className="sub-text">
                     놓을 아이콘의 제품{' '}
                     <select className="input-text" value={toolLine} onChange={(e) => setToolLine(e.target.value)}>
@@ -327,7 +428,7 @@ export default function DrawingEditor({ api, lines = [], canEdit = false, onErro
                   <button type="button" onClick={() => setZoom((z) => Math.min(4, Math.round((z + 0.2) * 10) / 10))}>＋</button>
                 </span>
                 <button type="button" className="btn-dark-sm" onClick={save} disabled={!dirty || !!busy}>
-                  {dirty ? '💾 아이콘 저장' : '저장됨'}
+                  {dirty ? '💾 저장' : '저장됨'}
                 </button>
                 <button type="button" className="btn-link" onClick={rename}>이름 바꾸기</button>
                 <label className="btn-link">
@@ -337,7 +438,7 @@ export default function DrawingEditor({ api, lines = [], canEdit = false, onErro
                 <button type="button" className="btn-text-danger" onClick={removeActive}>도면 삭제</button>
               </div>
               <div className="sub-text">
-                {tool ? `도면을 누르면 [${ICONS[tool].label}] 아이콘이 놓입니다.` : '아이콘을 누르면 선택, 끌면 옮겨집니다. 선택한 아이콘은 아래에서 제품 연결·메모·삭제 (Delete 키로도 삭제).'}
+                {tool === 'shape:text' ? '도면을 누르면 그 자리에 글자를 넣습니다.' : isShapeTool(tool) ? `도면에서 끌면 [${SHAPES[tool.slice(6)].label}]이(가) 그려집니다. 고른 도형은 양 끝 손잡이로 크기 조절, 끌어서 옮김.` : tool ? `도면을 누르면 [${ICONS[tool].label}] 아이콘이 놓입니다.` : '아이콘을 누르면 선택, 끌면 옮겨집니다. 선택한 아이콘은 아래에서 제품 연결·메모·삭제 (Delete 키로도 삭제).'}
               </div>
             </div>
           )}
@@ -355,11 +456,13 @@ export default function DrawingEditor({ api, lines = [], canEdit = false, onErro
               className={`dwg-board ${canEdit && tool ? 'placing' : ''}`}
               style={{ width: width * zoom }}
               onClick={onBoardClick}
+              onPointerDown={onBoardDown}
               onPointerMove={onMove}
               onPointerUp={onUp}
               onPointerCancel={onUp}
             >
               <img src={active.image} alt={active.name} draggable={false} />
+              <ShapeLayer w={active.w || 1000} h={active.h || 700} shapes={shapes} sel={sel} canEdit={canEdit} onDown={onShapeDown} />
               {icons.map((ic) => (
                 <DrawingIcon
                   key={ic.id}
@@ -373,6 +476,31 @@ export default function DrawingEditor({ api, lines = [], canEdit = false, onErro
             </div>
           </div>
 
+          {selShape && canEdit && (
+            <div className="dwg-selected">
+              <span className="dwg-shape-mark" style={{ color: selShape.color }}>{SHAPES[selShape.kind]?.mark}</span> <b>{SHAPES[selShape.kind]?.label}</b>
+              {selShape.kind === 'text' && (
+                <input className="input-text" value={selShape.text} onChange={(e) => setSelShape({ text: e.target.value })} maxLength={100} placeholder="글자" />
+              )}
+              <span className="dwg-colors">
+                {SHAPE_COLORS.map((c) => (
+                  <button key={c} type="button" className={selShape.color === c ? 'on' : ''} style={{ background: c }} onClick={() => setSelShape({ color: c })} title="색" />
+                ))}
+              </span>
+              <select className="input-text" value={selShape.size} onChange={(e) => setSelShape({ size: Number(e.target.value) })}>
+                {[1, 2, 3, 4, 5, 6, 8].map((n) => (
+                  <option key={n} value={n}>{selShape.kind === 'text' ? '크기' : '굵기'} {n}</option>
+                ))}
+              </select>
+              {(selShape.kind === 'rect' || selShape.kind === 'ellipse') && (
+                <label className="sub-text">
+                  <input type="checkbox" checked={!!selShape.fill} onChange={(e) => setSelShape({ fill: e.target.checked })} /> 안을 연하게 칠하기
+                </label>
+              )}
+              <button type="button" className="btn-text-danger" onClick={removeSelected}>지우기</button>
+              <button type="button" className="btn-link" onClick={() => setSel(null)}>닫기</button>
+            </div>
+          )}
           {selected && (
             <div className="dwg-selected">
               <DrawingIcon type={selected.type} style={{ position: 'static', transform: 'none' }} />
@@ -455,5 +583,62 @@ function PageChooser({ chooser, setChooser, onDone }) {
         <button type="button" className="btn-link" onClick={() => setChooser(null)}>취소</button>
       </div>
     </div>
+  );
+}
+
+// 도형·선·글자 그리기 (도면 그림 위 SVG) — 좌표는 도면 그림 크기(w×h) 기준이라 확대해도 비율 그대로
+function ShapeLayer({ w, h, shapes, sel, canEdit, onDown }) {
+  if (!shapes.length) return null;
+  const X = (v) => (v * w) / 100;
+  const Y = (v) => (v * h) / 100;
+  const sw = (s) => Math.max(1, w * 0.001 * s.size); // 선 굵기
+  const handle = Math.max(4, w * 0.006);
+  return (
+    <svg className="dwg-shapes" viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none">
+      <defs>
+        {SHAPE_COLORS.map((c) => (
+          <marker key={c} id={`dwg-arrow-${c.slice(1)}`} viewBox="0 0 10 10" refX="8" refY="5" markerWidth="4" markerHeight="4" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill={c} />
+          </marker>
+        ))}
+      </defs>
+      {shapes.map((s) => {
+        const on = s.id === sel && canEdit;
+        const common = { stroke: s.color, strokeWidth: sw(s), fill: s.fill ? s.color : 'none', fillOpacity: s.fill ? 0.15 : undefined };
+        const ev = canEdit ? { onPointerDown: (e) => onDown(e, s) } : {};
+        const x1 = Math.min(s.x, s.x2), y1 = Math.min(s.y, s.y2);
+        let el;
+        if (s.kind === 'rect') el = <rect x={X(x1)} y={Y(y1)} width={X(Math.abs(s.x2 - s.x))} height={Y(Math.abs(s.y2 - s.y))} {...common} />;
+        else if (s.kind === 'ellipse') el = <ellipse cx={X((s.x + s.x2) / 2)} cy={Y((s.y + s.y2) / 2)} rx={X(Math.abs(s.x2 - s.x) / 2)} ry={Y(Math.abs(s.y2 - s.y) / 2)} {...common} />;
+        else if (s.kind === 'line' || s.kind === 'arrow')
+          el = <line x1={X(s.x)} y1={Y(s.y)} x2={X(s.x2)} y2={Y(s.y2)} stroke={s.color} strokeWidth={sw(s)} strokeLinecap="round" markerEnd={s.kind === 'arrow' ? `url(#dwg-arrow-${s.color.slice(1)})` : undefined} />;
+        else
+          el = (
+            <text x={X(s.x)} y={Y(s.y)} fill={s.color} fontSize={w * 0.006 * s.size + 6} fontWeight="700" dominantBaseline="middle" stroke="#fff" strokeWidth={w * 0.0015 * s.size} paintOrder="stroke">
+              {s.text}
+            </text>
+          );
+        // 잡기 쉬운 넓은 투명 테두리 (도형 안쪽은 비워 둠 — 아래 아이콘·도면을 누를 수 있게)
+        const hitW = Math.max(sw(s) * 3, w * 0.008);
+        let hit = null;
+        if (canEdit) {
+          if (s.kind === 'rect') hit = <rect x={X(x1)} y={Y(y1)} width={X(Math.abs(s.x2 - s.x))} height={Y(Math.abs(s.y2 - s.y))} fill="none" stroke="transparent" strokeWidth={hitW} />;
+          else if (s.kind === 'ellipse') hit = <ellipse cx={X((s.x + s.x2) / 2)} cy={Y((s.y + s.y2) / 2)} rx={X(Math.abs(s.x2 - s.x) / 2)} ry={Y(Math.abs(s.y2 - s.y) / 2)} fill="none" stroke="transparent" strokeWidth={hitW} />;
+          else if (s.kind !== 'text') hit = <line x1={X(s.x)} y1={Y(s.y)} x2={X(s.x2)} y2={Y(s.y2)} stroke="transparent" strokeWidth={hitW} />;
+        }
+        return (
+          <g key={s.id} className={`dwg-shape ${on ? 'on' : ''}`} {...ev}>
+            {el}
+            {hit}
+            {on && s.kind !== 'text' && (
+              <>
+                <circle className="dwg-handle" cx={X(s.x)} cy={Y(s.y)} r={handle} onPointerDown={(e) => onDown(e, s, 1)} />
+                <circle className="dwg-handle" cx={X(s.x2)} cy={Y(s.y2)} r={handle} onPointerDown={(e) => onDown(e, s, 2)} />
+              </>
+            )}
+          </g>
+        );
+      })}
+    </svg>
   );
 }

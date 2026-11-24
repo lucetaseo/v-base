@@ -6574,3 +6574,59 @@ a.import-no:hover {
   object-fit: contain;
   background: #f3f4f6;
 }
+
+/* 시공 도면: 도형·선·글자 */
+.dwg-board.placing {
+  touch-action: none;
+}
+.dwg-shapes {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+.dwg-shape > * {
+  pointer-events: visiblePainted;
+}
+.dwg-shape text {
+  pointer-events: all;
+  user-select: none;
+}
+.dwg-shape.on > :first-child {
+  filter: drop-shadow(0 0 3px #60a5fa);
+}
+.dwg-shapes .dwg-handle {
+  fill: #fff;
+  stroke: #2563eb;
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+  cursor: grab;
+  pointer-events: all;
+}
+.dwg-shape-tools {
+  align-items: center;
+}
+.dwg-shape-mark {
+  display: inline-block;
+  min-width: 16px;
+  font-weight: 700;
+  text-align: center;
+}
+.dwg-colors {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+}
+.dwg-colors button {
+  width: 20px;
+  height: 20px;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px #cbd5e1;
+  cursor: pointer;
+}
+.dwg-colors button.on {
+  box-shadow: 0 0 0 2px #111827;
+}
