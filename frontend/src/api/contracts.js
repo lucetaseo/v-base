@@ -6,7 +6,7 @@
 import { loadDb, saveDb, nextId, publicBaseUrl, clientInfo, getSession, setSession, alimtalkGateway, hashPassword } from './runtime.js';
 import { ApiError, authorize, authorizeAny, clone, companyOf, findContract, findReadableContract, ownsContract, readableContracts, requireFeature, isLoginIdTaken, nowIso, validatePassword, visibleContracts } from './core.js';
 import { addHistory, assigneeOf, contractListView, contractView, hideAmounts } from './views.js';
-import { addStepPhotos, listStepPhotos, removeStepPhoto } from './stepPhotos.js';
+import { addStepPhotos, listStepPhotos, removeStepPhoto, updateStepPhoto } from './stepPhotos.js';
 import { assertAssignable } from './schedule.js';
 import { invalidateNumbers, numberOf } from './numbering.js';
 import { can, ROLES, DATA_SCOPES, DEFAULT_MANAGER_PERMISSIONS, isOwnScopeOnly } from '../auth/permissions.js';
@@ -184,6 +184,8 @@ function normalizeContractInput(db, user, data, existing) {
     customerName,
     customerPhone: formatPhone(data.customerPhone),
     customerPhone2: data.customerPhone2 ? formatPhone(data.customerPhone2) : '',
+    // 주 연락처: 2 면 연락처②가 주 연락처 (없으면 ①)
+    primaryPhone: Number(data.primaryPhone) === 2 && data.customerPhone2 ? 2 : 1,
     ownerId,
     aptName: data.aptName.trim(),
     dong: String(data.dong || '').trim(),
@@ -211,6 +213,8 @@ function normalizeContractInput(db, user, data, existing) {
     happyCallMemo: data.happyCallMemo || '',
     memo: data.memo || '',
     customerNote: String(data.customerNote || '').slice(0, 1000), // 고객 참고사항 (계약서·서명 화면에 고객에게 표시)
+    // 세대 참고 링크 (기능 householdLinks): [{ title, url }] 최대 10개, http(s) 주소만 — 기능 꺼진 업체는 예전 값 그대로
+    ...(hasFeature(companyOf(db, user), 'householdLinks') ? { links: cleanLinks(data.links) } : {}),
     // 신화탄성 양식: AS 보장범위(곰팡이·들뜸) / 시공후기 페이백 — 기능 꺼진 업체는 넣지 않음 (수정 때는 예전 값 그대로)
     ...(paint ? { asCoverage: !!data.asCoverage, reviewPayback: !!data.reviewPayback } : {}),
   };
@@ -253,7 +257,8 @@ function normalizeContractInput(db, user, data, existing) {
       let id = Number(p.id) || 0;
       if (!known.has(id) || seen.has(id)) id = ++nextPid;
       seen.add(id);
-      return normalizePayment(p, id);
+      const was = (existing?.payments || []).find((x) => x.id === id);
+      return normalizePayment({ ...p, byName: was ? was.byName || '' : user.name }, id); // 확인자: 처음 등록한 사람 그대로
     });
   } else if (Array.isArray(data.lineItems)) {
     // 금액 권한이 없어도 시공선택(패키지·추가시공품목)은 가능 — 가격은 화면에서 안 보이므로 서버가 정함
@@ -288,6 +293,15 @@ function normalizeContractInput(db, user, data, existing) {
 }
 
 // 입금 1건 정규화. 카드번호는 뒤 4자리만 저장 (전체 카드번호 저장 금지)
+// 세대 참고 링크: 제목 + http(s) 주소, 최대 10개 (빈 줄·잘못된 주소는 버림)
+function cleanLinks(list) {
+  return (Array.isArray(list) ? list : [])
+    .map((l) => ({ title: String(l?.title || '').trim().slice(0, 50), url: String(l?.url || '').trim().slice(0, 500) }))
+    .filter((l) => /^https?:\/\/\S+$/i.test(l.url))
+    .slice(0, 10)
+    .map((l) => ({ title: l.title || l.url.replace(/^https?:\/\//i, '').slice(0, 50), url: l.url }));
+}
+
 function normalizePayment(p, id) {
   const amount = Math.round(Number(p.amount) || 0);
   if (amount <= 0) throw new ApiError('입금액을 입력해 주세요.');
@@ -303,6 +317,7 @@ function normalizePayment(p, id) {
     cardLast4: String(p.cardLast4 || '').replace(/\D/g, '').slice(-4),
     receipt: oneOf(p.receipt, RECEIPT_TYPES, RECEIPT_TYPES[0]),
     memo: String(p.memo || '').slice(0, 200),
+    byName: String(p.byName || '').slice(0, 30), // 입금을 확인(등록)한 사람
     hasReceipt: !!p.hasReceipt, // 영수증 사진 첨부 여부 (사진은 paymentReceipts 에 따로 저장)
     receiptCount: Math.max(0, Math.floor(Number(p.receiptCount) || 0)) || (p.hasReceipt ? 1 : 0), // 첨부 사진 수
     createdAt: p.createdAt || nowIso(),
@@ -914,6 +929,41 @@ export const contracts = {
     return { photoCount: count };
   },
 
+  // 사진의 품목·공간·특이사항
+  async updateStepPhoto(id, photoId, note = {}) {
+    const { db, user } = await authorize('contract.edit');
+    requireFeature(db, user, 'stepPhotos');
+    const c = findContract(db, user, id);
+    updateStepPhoto(db, user, c, photoId, note);
+    saveDb(db);
+    return { ok: true };
+  },
+
+  // 검수 (기능 contractReview): 담당자가 원본(실물 계약서)과 입력값을 대조한 뒤 [점검 완료] — 필수 항목이 비면 막음
+  async setReview(id, done = true) {
+    const { db, user } = await authorize('contract.edit');
+    requireFeature(db, user, 'contractReview');
+    const c = findContract(db, user, id);
+    if (done) {
+      const missing = [
+        !String(c.customerName || '').trim() && '고객명',
+        !String(c.customerPhone || '').trim() && '연락처',
+        !String(c.aptName || '').trim() && '현장',
+        !c.contractDate && '계약일',
+        !(c.lineItems || []).length && !Number(c.totalAmount) && '시공내역·금액',
+      ].filter(Boolean);
+      if (missing.length) throw new ApiError(`비어 있는 필수 항목이 있어 점검 완료할 수 없습니다: ${missing.join(', ')}`);
+      c.review = { at: nowIso(), byName: user.name };
+      addHistory(c, user, '점검 완료');
+    } else {
+      c.review = null;
+      addHistory(c, user, '점검 완료 취소');
+    }
+    c.updatedAt = nowIso();
+    saveDb(db);
+    return contractView(c, user, db);
+  },
+
   async removeStepPhoto(id, photoId) {
     const { db, user } = await authorize('contract.edit');
     requireFeature(db, user, 'stepPhotos');
@@ -972,7 +1022,7 @@ export const contracts = {
     const c = findContract(db, user, id);
     if (c.deletedAt) throw new ApiError('휴지통에 있는 계약입니다.');
     c.payments = c.payments || [];
-    const p = normalizePayment({ ...payment, hasReceipt: false, receiptCount: 0 }, usedPaymentId(db, c) + 1);
+    const p = normalizePayment({ ...payment, byName: user.name, hasReceipt: false, receiptCount: 0 }, usedPaymentId(db, c) + 1);
     c.payments.push(p);
     changeReceipts(db, user, c, p, { ...receiptChangesOf(payment), image: payment.receiptImage || undefined });
     addHistory(c, user, `${p.kind === '환불' ? '환불' : '입금'} 등록`, [{ label: p.kind, from: '-', to: `${won(p.amount)}원 (${p.method})` }]);
@@ -988,7 +1038,7 @@ export const contracts = {
     const idx = (c.payments || []).findIndex((x) => x.id === Number(paymentId));
     if (idx < 0) throw new ApiError('입금 내역을 찾을 수 없습니다.', 'NOT_FOUND');
     const before = c.payments[idx];
-    const p = normalizePayment({ ...payment, createdAt: before.createdAt, hasReceipt: before.hasReceipt, receiptCount: before.receiptCount }, before.id);
+    const p = normalizePayment({ ...payment, byName: before.byName || '', createdAt: before.createdAt, hasReceipt: before.hasReceipt, receiptCount: before.receiptCount }, before.id);
     c.payments[idx] = p;
     changeReceipts(db, user, c, p, receiptChangesOf(payment));
     addHistory(c, user, '입금 수정', [{ label: `${before.kind} ${before.date}`, from: `${won(before.amount)}원`, to: `${won(p.amount)}원` }]);
@@ -1466,7 +1516,9 @@ export const customerApp = {
       .filter((c) => ownedBy(c, cust))
       .sort((x, y) => (y.contractDate || '').localeCompare(x.contractDate || '') || y.id - x.id)
       .map((c) => customerContractView(db, c));
-    return { company: { name: company?.name || '', code: company?.code || '' }, customer: { name: db.contracts.find((c) => ownedBy(c, cust))?.customerName || '' }, contracts: list };
+    // 상담 버튼(기능 customerHelp): 고객센터 전화 · 카카오톡 상담 주소 · 상담 시간
+    const help = hasFeature(company, 'customerHelp') ? { csPhone: company?.csPhone || '', kakaoUrl: company?.kakaoUrl || '', csHours: company?.csHours || '' } : null;
+    return { company: { name: company?.name || '', code: company?.code || '', help }, customer: { name: db.contracts.find((c) => ownedBy(c, cust))?.customerName || '' }, contracts: list };
   },
 
   async logout() {

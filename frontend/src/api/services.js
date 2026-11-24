@@ -23,7 +23,7 @@ import {
 } from './runtime.js';
 import { ROLES, DATA_SCOPES, permissionsOf, isOwnScopeOnly, ALL_PERMISSION_KEYS, can } from '../auth/permissions.js';
 import { digitsOnly, formatPhone } from '../utils/format.js';
-import { CATEGORIES, COMPANY_DOC_FIELDS, LIGHTING_TEAMS, DEPARTMENTS, brandTerms, companyCategories, hasFeature, parseCategories, parseFeatures, purchaseCategories, termsSource } from '../constants.js';
+import { CATEGORIES, COMPANY_DOC_FIELDS, HELP_FIELDS, LIGHTING_TEAMS, DEPARTMENTS, brandTerms, companyCategories, hasFeature, parseCategories, parseFeatures, purchaseCategories, termsSource } from '../constants.js';
 import { today } from '../utils/date.js';
 import { AUDIT_KEEP_DAYS, UNDO_KEEP, auditText, skipAudit, undoComparable } from './audit.js';
 import { addHistory } from './views.js';
@@ -256,6 +256,7 @@ export const companies = {
       address: company.address || '',
       // 계약서 하단 업체 정보 (신화탄성 양식: 업태·종목·고객센터·휴대번호·빠른문의)
       ...Object.fromEntries(COMPANY_DOC_FIELDS.map((k) => [k, String(company[k] || '').trim().slice(0, 50)])),
+      ...Object.fromEntries(HELP_FIELDS.map((k) => [k, String(company[k] || '').trim().slice(0, 200)])),
       brands: company.brands?.length ? company.brands : [company.name.trim()],
       ...(parseCategories(company.categories).length ? { categories: parseCategories(company.categories) } : {}),
       ...(company.features ? { features: parseFeatures(company.features) } : {}),
@@ -285,7 +286,10 @@ export const companies = {
     COMPANY_DOC_FIELDS.forEach((k) => {
       if (k in patch) patch = { ...patch, [k]: String(patch[k] || '').trim().slice(0, 50) };
     });
-    const allowed = ['code', 'name', 'ceo', 'bizNo', 'address', ...COMPANY_DOC_FIELDS, 'brands', 'categories', 'features', 'periodStart', 'periodEnd', 'active'];
+    HELP_FIELDS.forEach((k) => {
+      if (k in patch) patch = { ...patch, [k]: String(patch[k] || '').trim().slice(0, 200) };
+    });
+    const allowed = ['code', 'name', 'ceo', 'bizNo', 'address', ...COMPANY_DOC_FIELDS, ...HELP_FIELDS, 'brands', 'categories', 'features', 'periodStart', 'periodEnd', 'active'];
     allowed.forEach((k) => {
       if (k in patch) c[k] = patch[k];
     });
@@ -545,6 +549,11 @@ export const engineers = masterTable('engineers', {
       address: String(d.address || '').trim(),
       addressDetail: String(d.addressDetail || '').trim(),
       memo: d.memo || '',
+      // 기사 프로필 (배정할 때 참고): 거주 지역 · 이동·시공 가능 범위 · 전문 분야 · 장점·유의사항
+      region: String(d.region || '').trim().slice(0, 50),
+      serviceArea: String(d.serviceArea || '').trim().slice(0, 100),
+      specialty: String(d.specialty || '').trim().slice(0, 100),
+      strengths: String(d.strengths || '').trim().slice(0, 500),
       active: d.active !== false,
     };
   },

@@ -165,6 +165,7 @@ function MyContracts({ data }) {
       <p className="cust-hello">
         <b>{data.customer.name}</b>님의 계약 {data.contracts.length}건
       </p>
+      {data.company.help && <CustCalendar contracts={data.contracts} />}
       {data.contracts.map((c) => (
         <section key={c.id} className="cust-card">
           <div className="cust-card-top">
@@ -235,6 +236,87 @@ function MyContracts({ data }) {
           </div>
         </section>
       ))}
+      {data.company.help && <CustHelp help={data.company.help} />}
     </div>
+  );
+}
+
+// 시공 일정 달력 (기능 customerHelp): 내 계약들의 시공일을 달력에 표시 — 처음엔 다가오는 시공일이 있는 달
+function CustCalendar({ contracts }) {
+  const days = contracts.flatMap((c) =>
+    c.status === '취소' ? [] : c.schedules.map((s, i) => (s.date ? { date: s.date, label: `${c.category} ${i + 1}차`, done: s.done, time: timeLabel(s) || '' } : null)).filter(Boolean),
+  );
+  const t = new Date();
+  const todayKey = `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`;
+  const next = days.map((d) => d.date).filter((d) => d >= todayKey).sort()[0] || todayKey;
+  const [ym, setYm] = useState(() => next.slice(0, 7));
+  const [y, m] = ym.split('-').map(Number);
+  const move = (d) => {
+    const dt = new Date(y, m - 1 + d, 1);
+    setYm(`${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}`);
+  };
+  const first = new Date(y, m - 1, 1).getDay();
+  const last = new Date(y, m, 0).getDate();
+  const cells = [...Array(first).fill(null), ...Array.from({ length: last }, (_, i) => i + 1)];
+  const keyOf = (d) => `${ym}-${String(d).padStart(2, '0')}`;
+  const inMonth = days.filter((d) => d.date.startsWith(ym)).sort((a, b) => a.date.localeCompare(b.date));
+  return (
+    <section className="cust-card cust-calendar">
+      <div className="cust-cal-head">
+        <button type="button" onClick={() => move(-1)} aria-label="이전 달">‹</button>
+        <strong>
+          {y}년 {m}월 시공 일정
+        </strong>
+        <button type="button" onClick={() => move(1)} aria-label="다음 달">›</button>
+      </div>
+      <div className="cust-cal-grid">
+        {['일', '월', '화', '수', '목', '금', '토'].map((w) => (
+          <div key={w} className="cust-cal-w">{w}</div>
+        ))}
+        {cells.map((d, i) => {
+          if (!d) return <div key={i} />;
+          const hit = days.filter((x) => x.date === keyOf(d));
+          return (
+            <div key={i} className={`cust-cal-d ${hit.length ? (hit.every((x) => x.done) ? 'done' : 'has') : ''} ${keyOf(d) === todayKey ? 'today' : ''}`}>
+              {d}
+            </div>
+          );
+        })}
+      </div>
+      {inMonth.length ? (
+        <ul className="cust-cal-list">
+          {inMonth.map((d, i) => (
+            <li key={i}>
+              {formatKoreanDate(d.date)} {d.time} — {d.label} {d.done ? <span className="text-done">완료</span> : ''}
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="sub-text">이 달에는 시공 일정이 없습니다.</p>
+      )}
+    </section>
+  );
+}
+
+// 고객센터 연결 (기능 customerHelp): 전화 상담 · 카카오톡 상담 · 상담 시간
+function CustHelp({ help }) {
+  if (!help.csPhone && !help.kakaoUrl) return null;
+  return (
+    <section className="cust-card cust-help">
+      <h4>문의가 있으신가요?</h4>
+      <div className="cust-help-btns">
+        {help.csPhone && (
+          <a className="btn-confirm outline" href={`tel:${help.csPhone.replace(/[^\d+]/g, '')}`}>
+            📞 전화 상담 ({help.csPhone})
+          </a>
+        )}
+        {help.kakaoUrl && /^https?:\/\//i.test(help.kakaoUrl) && (
+          <a className="btn-confirm kakao" href={help.kakaoUrl} target="_blank" rel="noreferrer noopener">
+            💬 카카오톡 상담
+          </a>
+        )}
+      </div>
+      {help.csHours && <p className="sub-text">상담 시간: {help.csHours}</p>}
+    </section>
   );
 }

@@ -27,6 +27,8 @@ export const isMoldLine = (l) => String(l?.name || '').startsWith(MOLD_PREFIX);
 export const REVIEW_PAYBACK = 20000; // 시공 후기이벤트 참여 페이백
 // 계약서 하단 업체 정보 (운영자가 업체 등록·수정에서 입력): 업태 / 종목 / 고객센터 / 휴대번호 / 빠른문의
 export const COMPANY_DOC_FIELDS = ['bizType', 'bizItem', 'csPhone', 'mobile', 'quickPhone'];
+// 고객 페이지 상담 버튼 (기능 customerHelp): 카카오톡 상담 주소 · 상담 시간 — 전화는 고객센터(csPhone)
+export const HELP_FIELDS = ['kakaoUrl', 'csHours'];
 // 이 업체·구분이 신화탄성 양식인지 (기능이 켜져 있고 구분이 탄성·페인트)
 export const isPaintStyle = (company, category) => PAINT_STYLE_CATEGORIES.includes(category) && hasFeature(company, 'paintContract');
 
@@ -72,6 +74,9 @@ export const FEATURES = [
   { key: 'paintContract', label: '신화탄성 탄성·페인트 계약서 (시공장소·품질보증·구역, 곰팡이방지·AS보장·후기 페이백, 업체 정보 칸)', on: true },
   { key: 'photoStorage', label: '사진 전용 저장소 (새 사진을 DB 대신 사진 저장소에)', on: true },
   { key: 'stepPhotos', label: '시공 사진 (시공 1~4차 회차마다 사진 올리기 · 기사모바일·계약 상세)', on: true },
+  { key: 'contractReview', label: '계약 검수 (실물 계약서와 대조 후 [점검 완료] · 검수자·일시 기록)', on: true },
+  { key: 'householdLinks', label: '세대 참고 링크 (계약마다 참고 링크 여러 개)', on: true },
+  { key: 'customerHelp', label: '고객 페이지 시공 달력 · 카카오톡/전화 상담 버튼', on: true },
   { key: 'photoArchive', label: '시공 사진 정리 (기간별로 ZIP 내려받은 뒤 서버에서 지우기 — 관리자)', on: true },
   { key: 'callLog', label: '상담내역 메뉴 (전화번호별 통화 메모 · 번호 검색)', on: true },
   { key: 'scheduleLock', label: '시공일자·기사배정은 권한 있는 사람만 (권한 없으면 계약 등록에서 시공 칸 숨김)', on: true },

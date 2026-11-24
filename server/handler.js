@@ -201,7 +201,7 @@ const LIGHT_TABLES = {
 };
 
 // 입금 영수증 사진을 읽거나 바꾸는 요청 (첫 인자 = 계약 번호)
-const RECEIPT_CALLS = new Set(['contracts.receipt', 'contracts.addPayment', 'contracts.updatePayment', 'contracts.removePayment', 'contracts.update', 'contracts.paymentPhotos', 'contracts.paperPhotos', 'contracts.setPaperPhotos', 'contracts.asPhotos', 'contracts.setAs', 'contracts.addAsPhotos', 'contracts.stepPhotos', 'contracts.addStepPhotos', 'contracts.removeStepPhoto', 'engineerApp.paperPhotos', 'engineerApp.asPhotos', 'engineerApp.stepPhotos', 'engineerApp.addStepPhotos', 'engineerApp.removeStepPhoto', 'photoArchive.photos', 'photoArchive.purge']);
+const RECEIPT_CALLS = new Set(['contracts.receipt', 'contracts.addPayment', 'contracts.updatePayment', 'contracts.removePayment', 'contracts.update', 'contracts.paymentPhotos', 'contracts.paperPhotos', 'contracts.setPaperPhotos', 'contracts.asPhotos', 'contracts.setAs', 'contracts.addAsPhotos', 'contracts.stepPhotos', 'contracts.addStepPhotos', 'contracts.removeStepPhoto', 'contracts.updateStepPhoto', 'engineerApp.paperPhotos', 'engineerApp.asPhotos', 'engineerApp.stepPhotos', 'engineerApp.addStepPhotos', 'engineerApp.removeStepPhoto', 'engineerApp.updateStepPhoto', 'photoArchive.photos', 'photoArchive.purge']);
 
 // 계약 목록·통계: 저장하지 않는 요청이라 계약의 긴 글·변경이력 없이 읽어도 됨
 const SLIM_CALLS = new Set(['contracts.list', 'contracts.listCached', 'reports.contracts', 'reports.engineers', 'engineerApp.myAs', 'photoArchive.summary']);
@@ -231,6 +231,8 @@ const FOCUS_CALLS = new Set([
   'contracts.stepPhotos',
   'contracts.addStepPhotos',
   'contracts.removeStepPhoto',
+  'contracts.updateStepPhoto',
+  'contracts.setReview',
 ]);
 const focusOf = (name, args) => (name === 'contracts.create' ? [] : [].concat(args[0]).map(Number).filter((x) => Number.isSafeInteger(x)));
 

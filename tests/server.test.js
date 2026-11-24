@@ -2458,3 +2458,81 @@ test('조명 구분으로 새 업체 등록 + 팀관리 [목수팀·전선팀·�
   const teams = await a.ok('teams', 'list');
   assert.deepEqual(teams.filter((t) => t.kind === '시공팀').map((t) => t.name).sort(), ['목수팀', '전선팀', '조명팀']);
 });
+
+test('아르떼 바로 반영 묶음: 입금 확인자, 주 연락처, 세대 링크, 검수(점검 완료), 사진 품목·공간·특이사항, 기사 프로필, 고객 상담 버튼', async () => {
+  const admin = client();
+  await admin.ok('auth', 'login', 'admin', 'admin1234');
+  const gongId = (await admin.ok('engineers', 'list')).find((e) => e.loginId === 'gong').id;
+
+  // 주 연락처 · 세대 링크 · 입금 확인자
+  const c = await admin.ok('contracts', 'create', {
+    ...base,
+    customerName: '아르떼묶음고객',
+    customerPhone: '010-5050-1111',
+    customerPhone2: '010-5050-2222',
+    primaryPhone: 2,
+    totalAmount: 800000,
+    links: [{ title: '도면 폴더', url: 'https://example.com/plan' }, { title: '잘못된 주소', url: 'javascript:alert(1)' }, { url: 'http://example.com/x' }],
+    payments: [{ date: '2026-12-01', kind: '계약금', method: '계좌이체', amount: 100000 }],
+    schedules: [{ date: '2026-12-10', time: '09:00', assignType: 'engineer', engineerId: gongId }],
+  });
+  assert.equal(c.primaryPhone, 2, '주 연락처 ②');
+  assert.deepEqual(c.links, [{ title: '도면 폴더', url: 'https://example.com/plan' }, { title: 'example.com/x', url: 'http://example.com/x' }], 'http(s) 주소만, 제목 없으면 주소로');
+  assert.equal(c.payments[0].byName, '장경국', '입금 확인자 = 등록한 사람');
+  const added = await admin.ok('contracts', 'addPayment', c.id, { date: '2026-12-02', kind: '잔금', method: '현금', amount: 50000 });
+  assert.equal(added.payments[1].byName, '장경국');
+  const noPhone2 = await admin.ok('contracts', 'update', c.id, { ...added, customerPhone2: '', primaryPhone: 2 });
+  assert.equal(noPhone2.primaryPhone, 1, '연락처②가 없으면 주 연락처는 ①');
+  assert.equal(noPhone2.payments[0].byName, '장경국', '수정해도 확인자 그대로');
+
+  // 검수
+  const bare = await admin.ok('contracts', 'create', { ...base, customerName: '검수고객', customerPhone: '010-5050-3333' });
+  const fail = await admin('contracts', 'setReview', bare.id, true);
+  assert.equal(fail.status, 400, '시공내역·금액이 없으면 점검 완료 불가');
+  assert.match(fail.error.message, /시공내역·금액/);
+  const reviewed = await admin.ok('contracts', 'setReview', c.id, true);
+  assert.equal(reviewed.review.byName, '장경국', '검수자 기록');
+  assert.ok(reviewed.review.at, '검수 일시 기록');
+  assert.equal((await admin.ok('contracts', 'update', c.id, { ...reviewed, memo: '고침' })).review.byName, '장경국', '계약을 고쳐도 검수 기록 유지');
+  assert.equal((await admin.ok('contracts', 'setReview', c.id, false)).review, null, '점검 완료 취소');
+
+  // 사진 품목·공간·특이사항 + 촬영 시각
+  const img = (t) => 'data:image/jpeg;base64,' + Buffer.from(`note-${t}`).toString('base64');
+  await admin.ok('contracts', 'addStepPhotos', c.id, 0, [{ image: img(1), takenAt: '2026-12-10T01:02:03.000Z', item: '다운라이트', space: '거실' }]);
+  const eng = client();
+  await eng.ok('auth', 'login', 'gong', 'gong1234', '', 'engineer');
+  await eng.ok('engineerApp', 'addStepPhotos', c.id, 0, [img(2)]);
+  const ps = await admin.ok('contracts', 'stepPhotos', c.id, 0);
+  const office = ps.find((p) => p.item === '다운라이트');
+  const mine = ps.find((p) => p.byEngineerId === gongId);
+  assert.equal(office.space, '거실');
+  assert.equal(office.takenAt, '2026-12-10T01:02:03.000Z', '촬영 시각');
+  await eng.ok('engineerApp', 'updateStepPhoto', c.id, mine.id, { space: '안방', item: '실링팬', memo: '천장 보강 필요 — 추가 작업' });
+  assert.equal((await eng('engineerApp', 'updateStepPhoto', c.id, office.id, { memo: 'x' })).status, 403, '기사는 본인 사진만 고침');
+  await admin.ok('contracts', 'updateStepPhoto', c.id, office.id, { item: '다운라이트 3인치', space: '거실', memo: '' });
+  const ps2 = await admin.ok('contracts', 'stepPhotos', c.id, 0);
+  assert.equal(ps2.find((p) => p.id === mine.id).memo, '천장 보강 필요 — 추가 작업');
+  assert.equal(ps2.find((p) => p.id === office.id).item, '다운라이트 3인치');
+  assert.deepEqual((await eng.ok('engineerApp', 'contract', c.id)).contracts.find((x) => x.id === c.id).links.map((l) => l.title), ['도면 폴더', 'example.com/x'], '기사도 참고 링크 봄');
+
+  // 기사 프로필
+  const e = await admin.ok('engineers', 'save', { name: '프로필기사', phone: '010-5050-4444', region: '경기 남양주', serviceArea: '서울 동부·경기 동부', specialty: '간접조명 목공', strengths: '마감 꼼꼼 / 주말 불가' });
+  assert.deepEqual([e.region, e.serviceArea, e.specialty, e.strengths], ['경기 남양주', '서울 동부·경기 동부', '간접조명 목공', '마감 꼼꼼 / 주말 불가']);
+
+  // 고객 상담 버튼 (운영자가 업체 정보에 입력)
+  const sup = client();
+  await sup.ok('auth', 'login', 'super', 'super-test-1234');
+  const good = (await sup.ok('companies', 'list')).find((x) => x.code === 'thegood');
+  await sup.ok('companies', 'update', good.id, { csPhone: '1588-0000', kakaoUrl: 'https://pf.kakao.com/_abc/chat', csHours: '평일 9시~18시' });
+  const cust = client();
+  const me = await cust.ok('customerApp', 'login', 'thegood', '아르떼묶음고객', '010-5050-1111');
+  assert.deepEqual(me.company.help, { csPhone: '1588-0000', kakaoUrl: 'https://pf.kakao.com/_abc/chat', csHours: '평일 9시~18시' });
+
+  // 기능 스위치를 끄면: 검수 막힘, 링크는 예전 값 그대로, 상담 버튼 없음
+  await sup.ok('companies', 'update', good.id, { features: { contractReview: false, householdLinks: false, customerHelp: false } });
+  assert.equal((await admin('contracts', 'setReview', c.id, true)).status, 403);
+  const kept = await admin.ok('contracts', 'update', c.id, { ...(await admin.ok('contracts', 'get', c.id)), links: [] });
+  assert.equal(kept.links.length, 2, '링크 기능을 끄면 저장된 링크는 건드리지 않음');
+  assert.equal((await cust.ok('customerApp', 'me')).company.help, null);
+  await sup.ok('companies', 'update', good.id, { features: {} });
+});

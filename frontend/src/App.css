@@ -6200,3 +6200,133 @@ a.import-no:hover {
   opacity: 0.45;
   cursor: not-allowed;
 }
+
+/* 시공 사진: 품목·공간·특이사항 */
+.step-photo-cap {
+  margin-top: 3px;
+  font-size: 11px;
+  line-height: 1.35;
+  word-break: break-all;
+}
+
+.step-photo-memo {
+  color: #b45309;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.step-photo-note {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid #c7d2fe;
+  border-radius: 6px;
+  background: #eef2ff;
+}
+
+/* 주 연락처 · 참고 링크 · 검수 */
+.primary-star {
+  color: #d97706;
+}
+
+.primary-phone {
+  margin-top: 4px;
+}
+
+.links-editor .link-row {
+  margin-bottom: 6px;
+}
+
+.links-editor .link-url {
+  flex: 1;
+  min-width: 220px;
+}
+
+.household-link {
+  display: inline-block;
+  margin: 2px 12px 2px 0;
+  color: #1a6fe0;
+  text-decoration: underline;
+}
+
+.review-done {
+  color: #15803d;
+  font-weight: 600;
+}
+
+/* 고객 페이지: 시공 달력 · 상담 버튼 */
+.cust-cal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.cust-cal-head button {
+  width: 34px;
+  height: 34px;
+  border: 1px solid #dce1e8;
+  border-radius: 6px;
+  background: #fff;
+  font-size: 18px;
+  cursor: pointer;
+}
+
+.cust-cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 4px;
+  text-align: center;
+  font-size: 13px;
+}
+
+.cust-cal-w {
+  color: #64748b;
+  font-size: 12px;
+}
+
+.cust-cal-d {
+  padding: 6px 0;
+  border-radius: 6px;
+}
+
+.cust-cal-d.has {
+  background: #1a6fe0;
+  color: #fff;
+  font-weight: 700;
+}
+
+.cust-cal-d.done {
+  background: #dcfce7;
+  color: #15803d;
+  font-weight: 700;
+}
+
+.cust-cal-d.today {
+  outline: 2px solid #f59e0b;
+}
+
+.cust-cal-list {
+  margin: 10px 0 0;
+  padding-left: 18px;
+  font-size: 13px;
+}
+
+.cust-help h4 {
+  margin: 0 0 8px;
+}
+
+.cust-help-btns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.btn-confirm.kakao {
+  background: #fee500;
+  border-color: #fee500;
+  color: #191919;
+}
