@@ -10,6 +10,7 @@ import { goBack, match, navigate, navigateForward } from '../../router.js';
 import { REGIONS, SIDO_LIST } from '../../utils/regions.js';
 import EngineerForm from './EngineerForm.jsx';
 import { resetAptCache } from '../../components/AptSearchInput.jsx';
+import { compressImage } from '../../utils/image.js';
 
 const PAGE_SIZE = 20;
 
@@ -385,6 +386,7 @@ export function TeamSettings() {
 
 export function ProductSettings({ path = '' }) {
   const WORK_CATEGORIES = currentWorkCategories(); // 업체 구분 (운영자가 정한 순서)
+  const productInfo = currentHasFeature('drawings') && currentHasFeature('customerDrawings'); // 고객 도면 제품 설명 (사양·사진)
   return (
     <MasterPage
       title="상품관리"
@@ -402,7 +404,7 @@ export function ProductSettings({ path = '' }) {
         { key: 'category', placeholder: '시공 구분', options: WORK_CATEGORIES },
         { key: 'kind', placeholder: '상품 종류', options: PRODUCT_KINDS },
       ]}
-      emptyForm={{ name: '', kind: PRODUCT_KINDS[0], category: WORK_CATEGORIES[0], detail: '', freeDetail: '', price: '', warranty: '', visible: true }}
+      emptyForm={{ name: '', kind: PRODUCT_KINDS[0], category: WORK_CATEGORIES[0], detail: '', freeDetail: '', price: '', warranty: '', spec: '', visible: true }}
       columns={[
         { key: 'name', label: '상품명', className: 'text-left' },
         { key: 'kind', label: '상품 종류' },
@@ -410,6 +412,7 @@ export function ProductSettings({ path = '' }) {
         { key: 'detail', label: '상세품목', className: 'text-left' },
         { key: 'price', label: '금액', className: 'text-right', render: (r) => won(r.price) },
         ...(currentHasFeature('paintContract') ? [{ key: 'warranty', label: '품질보증', render: (r) => r.warranty || '-' }] : []),
+        ...(productInfo ? [{ key: 'hasPhoto', label: '제품 사진', render: (r) => (r.hasPhoto ? '있음' : '-') }] : []),
         { key: 'visible', label: '활성화', render: (r) => (r.visible === false ? <span className="text-red">비활성</span> : '활성') },
       ]}
       fields={[
@@ -420,9 +423,63 @@ export function ProductSettings({ path = '' }) {
         { key: 'freeDetail', label: '무료시공내역', type: 'textarea', rows: 10 },
         { key: 'price', label: '금액', type: 'money', help: '계약 등록 [시공선택]에서 이 상품을 고르면 이 금액이 단가로 들어갑니다.' },
         ...(currentHasFeature('paintContract') ? [{ key: 'warranty', label: '품질보증', help: 'A/S 기간 (예: 10년). 탄성·페인트 계약서의 품질보증 칸에 들어갑니다.' }] : []),
+        ...(productInfo
+          ? [
+              { key: 'spec', label: '제품 사양', type: 'textarea', rows: 4, help: '고객 확인 페이지의 시공 도면에서 이 제품 아이콘을 누르면 보입니다. (예: 3인치 LED 6W, 색온도 4000K, 화이트)' },
+              { key: 'photo', label: '제품 사진', type: 'custom', render: (form) => <ProductPhotoField id={form.id} /> },
+            ]
+          : []),
         { key: 'visible', label: '활성화', type: 'checkbox', checkLabel: '활성화', note: '사용하지 않는 상품은 비활성화 하세요. 비활성화 하시면 계약서 작성 시 상품리스트에 표시되지 않습니다.' },
       ]}
     />
+  );
+}
+
+// 제품 사진 (기능 customerDrawings): 고객 도면에서 아이콘을 누르면 보이는 사진 — 상품을 먼저 저장한 뒤 올림
+function ProductPhotoField({ id }) {
+  const [image, setImage] = useState(null); // null: 불러오는 중
+  const [busy, setBusy] = useState('');
+  const [error, setError] = useState('');
+  useEffect(() => {
+    if (!id) return;
+    products.photo(id).then((r) => setImage(r.image || ''), (e) => setError(e.message));
+  }, [id]);
+  if (!id) return <span className="field-note">ⓘ 상품을 먼저 저장한 뒤 [수정]에서 사진을 올릴 수 있습니다.</span>;
+  const upload = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    try {
+      setBusy('올리는 중...');
+      setError('');
+      const img = await compressImage(file, { maxSize: 1200, quality: 0.8, maxBytes: 500 * 1024 });
+      await products.setPhoto(id, img);
+      setImage(img);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy('');
+    }
+  };
+  const remove = async () => {
+    if (!window.confirm('제품 사진을 지울까요?')) return;
+    try {
+      await products.setPhoto(id, '');
+      setImage('');
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+  return (
+    <div className="inline-fields">
+      {image ? <img src={image} alt="제품 사진" style={{ width: 96, height: 96, objectFit: 'cover', borderRadius: 6, border: '1px solid #e5e7eb' }} /> : <span className="sub-text">{image === null ? '불러오는 중...' : '사진 없음'}</span>}
+      <label className="btn-link">
+        {busy || (image ? '사진 바꾸기' : '+ 사진 올리기')}
+        <input type="file" accept="image/*" onChange={upload} hidden disabled={!!busy} />
+      </label>
+      {image && <button type="button" className="btn-text-danger" onClick={remove}>사진 지우기</button>}
+      {error && <span className="text-red">{error}</span>}
+    </div>
   );
 }
 

@@ -118,6 +118,8 @@ const READ_ONLY = new Set([
   'contracts.asPhotos',
   'contracts.stepPhotos',
   'contracts.drawings',
+  'products.photo',
+  'customerApp.drawings',
   'esign.getByToken',
   'customerApp.login',
   'customerApp.linkLogin',
@@ -168,6 +170,8 @@ const LIGHT_TABLES = {
   'teams.list': ['teams'],
   'teams.addLightingTeams': ['teams'],
   'products.list': ['products'],
+  'products.photo': ['products'],
+  'products.setPhoto': ['products'],
   'imports.products': ['products'],
   'callLogs.list': ['callLogs'],
   'purchases.list': ['purchases'],
@@ -203,6 +207,9 @@ const LIGHT_TABLES = {
 
 // 입금 영수증 사진을 읽거나 바꾸는 요청 (첫 인자 = 계약 번호)
 const RECEIPT_CALLS = new Set(['contracts.receipt', 'contracts.addPayment', 'contracts.updatePayment', 'contracts.removePayment', 'contracts.update', 'contracts.paymentPhotos', 'contracts.paperPhotos', 'contracts.setPaperPhotos', 'contracts.asPhotos', 'contracts.setAs', 'contracts.addAsPhotos', 'contracts.stepPhotos', 'contracts.addStepPhotos', 'contracts.removeStepPhoto', 'contracts.updateStepPhoto', 'contracts.drawings', 'contracts.saveDrawing', 'contracts.removeDrawing', 'engineerApp.paperPhotos', 'engineerApp.asPhotos', 'engineerApp.stepPhotos', 'engineerApp.addStepPhotos', 'engineerApp.removeStepPhoto', 'engineerApp.updateStepPhoto', 'photoArchive.photos', 'photoArchive.purge']);
+
+// 상품 사진(제품 사진)을 읽거나 바꾸는 요청
+const PRODUCT_PHOTO_CALLS = new Set(['products.photo', 'products.setPhoto', 'products.remove']);
 
 // 계약 목록·통계: 저장하지 않는 요청이라 계약의 긴 글·변경이력 없이 읽어도 됨
 const SLIM_CALLS = new Set(['contracts.list', 'contracts.listCached', 'reports.contracts', 'reports.engineers', 'engineerApp.myAs', 'photoArchive.summary']);
@@ -407,6 +414,7 @@ async function handleRpcOnce(req, attempt) {
       if (name === 'esign.getByToken' && contractId) scope.signatureFor = contractId; // 서명 후 다시 열면 본인 서명 표시
     } else if (service === 'customerApp') {
       scope = { companyId: await companyIdForCustomer(client, name, args, ctx.session) }; // 고객모바일
+      if (name === 'customerApp.drawings') Object.assign(scope, { receiptsFor: args[0], productPhotos: true }); // 도면 그림 + 제품 사진
     } else {
       const who = await resolveCompanyId(client, ctx.session);
       scope = who.isSuper ? { allCompanies: true } : { companyId: who.companyId };
@@ -414,6 +422,7 @@ async function handleRpcOnce(req, attempt) {
       if (LIGHT_TABLES[name]) scope.tables = LIGHT_TABLES[name];
       if (name === 'contracts.get' || name === 'contracts.signBundle') scope.signatureFor = args[0]; // 계약서 보기일 때만 서명 이미지 로드
       if (RECEIPT_CALLS.has(name)) scope.receiptsFor = args[0]; // 이 계약의 영수증 사진만 로드
+      if (PRODUCT_PHOTO_CALLS.has(name)) scope.productPhotos = true; // 상품 사진 (kind 'productPhoto')
       if (name === 'auditLogs.list') scope.auditLogs = true; // 수정 로그 화면
       if (name === 'auditLogs.undo') scope.auditLogId = Number(args[0]) || -1; // 되돌리기: 그 기록 하나 (+ 이미 되돌렸는지)
       if (SLIM_CALLS.has(name) && readOnlyCall) scope.slimContracts = true; // 목록: 긴 글·변경이력은 읽지 않음

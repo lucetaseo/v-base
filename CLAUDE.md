@@ -17,6 +17,7 @@
 - `contracts.js` 계약 전체(등록·수정·입금·사진·AS·서명·알림톡 `notifications`·가져오기 `imports`·고객확인 `customerApp`) — 큰 파일이라 함수 이름으로 grep
 - `services.js` 로그인 `auth`·업체 `companies`·직원 `users`·기사 `engineers`·팀·상품·아파트·수정로그 `auditLogs`(되돌리기)·상담내역 `callLogs`·매입 `purchases`·재고 `stocks`
 - `schedule.js` 일정·휴무·박람회 `fairs`·기사모바일 `engineerApp` / `core.js` 세션·권한·`requireFeature` / `views.js` 화면용 계약 모양·변경이력
+- `drawings.js` 시공 도면(층별 도면·조명 아이콘, 고객 보기 `customerApp.drawings`) / 도면 파일 읽기 `utils/planFile.js`(그림·PDF·PPT)
 - `files.js` 회사 자료 백업 `companyFiles`(파일은 Supabase Storage, 목록은 업체 정보 `files`)
 - `audit.js` 수정로그 문구·되돌리기 자료 / `numbering.js` 계약번호(계약일 순) / `seed.js` 데모 자료·`migrate()` / `sessionSlots.js` 탭별 로그인 칸
 - `constants.js`(src 바로 아래) 브랜드·시공 구분·`FEATURES` 기능 스위치

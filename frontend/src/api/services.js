@@ -600,7 +600,11 @@ export const teams = {
   },
 };
 
-export const products = masterTable('products', {
+const productTable = masterTable('products', {
+  // 상품을 지우면 제품 사진도 함께 (사진 표에 남지 않게)
+  beforeRemove: (db, row) => {
+    db.paymentReceipts = (db.paymentReceipts || []).filter((r) => !(r.kind === 'productPhoto' && r.productId === row.id && r.companyId === row.companyId));
+  },
   normalize: (d) => ({
     name: required(d.name, '상품명을 입력해 주세요.'),
     kind: d.kind || '패키지',
@@ -609,9 +613,34 @@ export const products = masterTable('products', {
     freeDetail: d.freeDetail || '', // 무료시공내역
     price: Math.max(0, Number(d.price) || 0),
     warranty: String(d.warranty || '').trim().slice(0, 30), // 품질보증 A/S 기간 (신화탄성 양식 계약서, 비우면 '')
+    spec: String(d.spec || '').trim().slice(0, 500), // 제품 사양 (고객 도면에서 아이콘을 누르면 보임)
     visible: d.visible !== false,
   }),
 });
+
+// 상품: 기본 목록·저장·삭제 + 제품 사진 (고객 도면에서 아이콘을 누르면 사진·사양)
+//   사진은 사진 표(paymentReceipts)에 kind 'productPhoto', productId 로 (사진 저장소를 켜면 저장소로), 상품에는 hasPhoto 만
+export const products = {
+  ...productTable,
+  async photo(id) {
+    const { db, user } = await session();
+    const row = (db.paymentReceipts || []).find((r) => r.kind === 'productPhoto' && r.productId === Number(id) && r.companyId === user.companyId);
+    return { image: row?.image || '' };
+  },
+  async setPhoto(id, image) {
+    const { db, user } = await authorize('settings.manage');
+    const p = db.products.find((x) => x.id === Number(id) && x.companyId === user.companyId);
+    if (!p) throw new ApiError('상품을 찾을 수 없습니다.', 'NOT_FOUND');
+    if (image && (!/^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(String(image)) || image.length > 3 * 1024 * 1024)) {
+      throw new ApiError('사진 파일(jpg, png)만, 3MB 이하로 올려 주세요.');
+    }
+    db.paymentReceipts = (db.paymentReceipts || []).filter((r) => !(r.kind === 'productPhoto' && r.productId === p.id && r.companyId === user.companyId));
+    if (image) db.paymentReceipts.push({ id: nextId(db, 'paymentReceipts'), companyId: user.companyId, contractId: 0, paymentId: null, kind: 'productPhoto', productId: p.id, image, createdAt: nowIso() });
+    p.hasPhoto = !!image;
+    saveDb(db);
+    return { hasPhoto: p.hasPhoto };
+  },
+};
 
 const apartmentsBase = masterTable('apartments', {
   normalize: (d, db, user) => {

@@ -83,13 +83,15 @@ export async function loadSnapshot(client, scope) {
   // scope.tables: 이 요청에 필요한 업체 표만 (없으면 전부) — 트래픽 절약
   const wanted = scope.tables || COMPANY_SCOPED.filter((k) => !HEAVY.includes(k));
   for (const key of COMPANY_SCOPED) {
-    if (key === 'paymentReceipts' && scope.companyId && scope.receiptsFor) {
+    if (key === 'paymentReceipts' && scope.companyId && (scope.receiptsFor || scope.productPhotos)) {
       db[key] = (
         // receiptsFor: 계약 번호 하나, 또는 여러 건(AS 접수 등 목록에서 고른 계약들)
-        await rows(client, `SELECT data FROM payment_receipts WHERE company_id = $1 AND data->>'contractId' = ANY($2::text[]) ORDER BY id`, [
-          scope.companyId,
-          [].concat(scope.receiptsFor).map((x) => String(Number(x))),
-        ])
+        // productPhotos: 상품 사진(kind 'productPhoto')도 함께 — 상품관리 사진·고객 도면 제품 설명
+        await rows(
+          client,
+          `SELECT data FROM payment_receipts WHERE company_id = $1 AND (data->>'contractId' = ANY($2::text[]) OR ($3 AND data->>'kind' = 'productPhoto')) ORDER BY id`,
+          [scope.companyId, [].concat(scope.receiptsFor || []).map((x) => String(Number(x))), !!scope.productPhotos],
+        )
       ).map(toObj);
     } else if (scope.companyId && wanted.includes(key)) {
       // 목록 요청(읽기 전용)은 계약의 긴 글·변경이력을 DB 에서 아예 읽지 않음
