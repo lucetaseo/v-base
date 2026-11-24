@@ -6330,3 +6330,178 @@ a.import-no:hover {
   border-color: #fee500;
   color: #191919;
 }
+
+/* 시공 도면: 층별 도면 + 조명 아이콘 */
+.dwg-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.dwg-tabs button,
+.dwg-add {
+  padding: 6px 12px;
+  border: 1px solid #c9d3e3;
+  border-radius: 6px;
+  background: #fff;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.dwg-tabs button.active {
+  border-color: #1a6fe0;
+  background: #1a6fe0;
+  color: #fff;
+}
+
+.dwg-tabs button.active .sub-text {
+  color: #dbeafe;
+}
+
+.dwg-add {
+  border-style: dashed;
+  color: #1a6fe0;
+  font-weight: 700;
+}
+
+.dwg-toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.dwg-palette {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.dwg-tool {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border: 1px solid #dce1e8;
+  border-radius: 6px;
+  background: #fff;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.dwg-tool.active {
+  border-color: #1a6fe0;
+  background: #eff6ff;
+  font-weight: 700;
+}
+
+.dwg-zoom {
+  display: inline-flex;
+  gap: 2px;
+}
+
+.dwg-zoom button {
+  min-width: 34px;
+  height: 30px;
+  border: 1px solid #c9d3e3;
+  border-radius: 4px;
+  background: #fff;
+  cursor: pointer;
+}
+
+.dwg-stage {
+  max-height: 75vh;
+  overflow: auto;
+  border: 1px solid #dce1e8;
+  border-radius: 6px;
+  background: #f1f5f9;
+  touch-action: pan-x pan-y;
+}
+
+.dwg-board {
+  position: relative;
+  max-width: none;
+  user-select: none;
+}
+
+.dwg-board.placing {
+  cursor: crosshair;
+}
+
+.dwg-board img {
+  display: block;
+  width: 100%;
+  height: auto;
+  pointer-events: none;
+}
+
+.dwg-icon {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  min-width: 28px;
+  height: 28px;
+  padding: 0 3px;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 24px;
+  cursor: grab;
+  touch-action: none;
+  white-space: nowrap;
+}
+
+.dwg-icon.wide {
+  min-width: 40px;
+  border-radius: 6px;
+}
+
+.dwg-icon.selected {
+  outline: 3px solid #1a6fe0;
+  outline-offset: 2px;
+  z-index: 2;
+}
+
+.dwg-selected {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  padding: 8px 10px;
+  border: 1px solid #bfdbfe;
+  border-radius: 6px;
+  background: #eff6ff;
+}
+
+.dwg-legend {
+  margin-top: 8px;
+  font-size: 13px;
+}
+
+.dwg-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin: 3px 10px 3px 0;
+}
+
+.dwg-legend-item .dwg-icon {
+  min-width: 22px;
+  height: 22px;
+  line-height: 18px;
+  font-size: 9px;
+}
+
+.dwg-legend-lines {
+  margin-top: 4px;
+}
+
+.dwg-legend-item.mismatch {
+  color: #b45309;
+  font-weight: 700;
+}

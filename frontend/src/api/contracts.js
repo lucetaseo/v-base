@@ -7,6 +7,7 @@ import { loadDb, saveDb, nextId, publicBaseUrl, clientInfo, getSession, setSessi
 import { ApiError, authorize, authorizeAny, clone, companyOf, findContract, findReadableContract, ownsContract, readableContracts, requireFeature, isLoginIdTaken, nowIso, validatePassword, visibleContracts } from './core.js';
 import { addHistory, assigneeOf, contractListView, contractView, hideAmounts } from './views.js';
 import { addStepPhotos, listStepPhotos, removeStepPhoto, updateStepPhoto } from './stepPhotos.js';
+import { listDrawings, removeDrawing, saveDrawing } from './drawings.js';
 import { assertAssignable } from './schedule.js';
 import { invalidateNumbers, numberOf } from './numbering.js';
 import { can, ROLES, DATA_SCOPES, DEFAULT_MANAGER_PERMISSIONS, isOwnScopeOnly } from '../auth/permissions.js';
@@ -927,6 +928,35 @@ export const contracts = {
     if (count !== before) addHistory(c, user, '시공 사진', [{ label: `${Number(stepIndex) + 1}차 사진`, from: `${before}장`, to: `${count}장` }]);
     saveDb(db);
     return { photoCount: count };
+  },
+
+  // 시공 도면 (기능 drawings): 층별 도면 그림 + 조명 아이콘
+  async drawings(id) {
+    const { db, user } = await authorize('contract.view');
+    requireFeature(db, user, 'drawings');
+    const c = findReadableContract(db, user, id);
+    return listDrawings(db, c);
+  },
+
+  async saveDrawing(id, data = {}) {
+    const { db, user } = await authorize('contract.edit');
+    requireFeature(db, user, 'drawings');
+    const c = findContract(db, user, id);
+    const isNew = !data.drawingId;
+    const d = saveDrawing(db, user, c, data);
+    if (isNew || data.image) addHistory(c, user, isNew ? '도면 추가' : '도면 그림 바꿈', [{ label: '도면', from: '', to: d.name }]);
+    saveDb(db);
+    return { drawing: { ...d } };
+  },
+
+  async removeDrawing(id, drawingId) {
+    const { db, user } = await authorize('contract.edit');
+    requireFeature(db, user, 'drawings');
+    const c = findContract(db, user, id);
+    const d = removeDrawing(db, c, drawingId);
+    addHistory(c, user, '도면 삭제', [{ label: '도면', from: d.name, to: '' }]);
+    saveDb(db);
+    return { ok: true };
   },
 
   // 사진의 품목·공간·특이사항

@@ -84,6 +84,8 @@ const ACTIONS = {
   'contracts.addStepPhotos': '시공 사진 추가',
   'contracts.updateStepPhoto': '시공 사진 메모',
   'contracts.setReview': '계약 점검(검수)',
+  'contracts.saveDrawing': '도면 저장',
+  'contracts.removeDrawing': '도면 삭제',
   'engineerApp.updateStepPhoto': '시공 사진 메모 (기사)',
   'photoArchive.purge': '시공 사진 정리 (내려받은 뒤 지움)',
   'contracts.removeStepPhoto': '시공 사진 삭제',
