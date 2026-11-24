@@ -2643,7 +2643,8 @@ test('고객 도면 보기 (customerDrawings): 제품 사양·사진 → 고객�
     ],
   });
   const img = 'data:image/png;base64,' + Buffer.from('floor').toString('base64');
-  await admin.ok('contracts', 'saveDrawing', c.id, { name: '1층', image: img, icons: [{ id: 'a', type: 'downlight', x: 10, y: 10, line: 0, note: '사무실 메모' }, { id: 'b', type: 'switch', x: 20, y: 20, line: 1 }] });
+  const dr = await admin.ok('contracts', 'saveDrawing', c.id, { name: '1층', image: img, icons: [{ id: 'a', type: 'downlight', x: 10, y: 10, line: 0, note: '사무실 메모' }, { id: 'b', type: 'switch', x: 20, y: 20, line: 1 }] });
+  await admin.ok('contracts', 'confirmDrawing', c.id, dr.drawing.id); // 확정해야 고객에게 보임 (drawingConfirm)
 
   const cust = client();
   const me = await cust.ok('customerApp', 'login', 'thegood', '도면보는고객', '01048482222');
@@ -2720,7 +2721,8 @@ test('계약서에 시공 도면 넣기 (drawingsInContract): 서명 링크로 �
   await admin.ok('auth', 'login', 'admin', 'admin1234');
   const c = await admin.ok('contracts', 'create', { ...base, customerName: '도면계약서고객', customerPhone: '010-5858-1111', lineItems: [{ name: '다운라이트', qty: 3, unitPrice: 20000 }] });
   const img = 'data:image/png;base64,' + Buffer.from('room').toString('base64');
-  await admin.ok('contracts', 'saveDrawing', c.id, { name: '거실', image: img, w: 800, h: 600, icons: [{ id: 'a', type: 'downlight', x: 10, y: 20, line: 0, note: '사무실 메모' }], shapes: [{ id: 's', kind: 'text', x: 5, y: 5, text: '거실 2.4m' }] });
+  const dr = await admin.ok('contracts', 'saveDrawing', c.id, { name: '거실', image: img, w: 800, h: 600, icons: [{ id: 'a', type: 'downlight', x: 10, y: 20, line: 0, note: '사무실 메모' }], shapes: [{ id: 's', kind: 'text', x: 5, y: 5, text: '거실 2.4m' }] });
+  await admin.ok('contracts', 'confirmDrawing', c.id, dr.drawing.id);
   const { token } = await admin.ok('contracts', 'requestSign', c.id);
   const anon = client();
   const doc = await anon.ok('esign', 'getByToken', token);
@@ -2740,6 +2742,118 @@ test('계약서에 시공 도면 넣기 (drawingsInContract): 서명 링크로 �
   await sup.ok('companies', 'update', good.id, { features: { drawingsInContract: false } });
   try {
     assert.deepEqual(await anon.ok('esign', 'drawings', token), [], '기능 끄면 계약서에 도면 없음');
+  } finally {
+    await sup.ok('companies', 'update', good.id, { features: {} });
+  }
+});
+
+test('도면 확정 (drawingConfirm): 확정 전엔 고객·계약서에 안 보임, 확정하면 보임, 내용을 고치면 확정이 풀림, 이름만 바꾸면 유지, 기능 끄면 모두 보임', async () => {
+  const admin = client();
+  await admin.ok('auth', 'login', 'admin', 'admin1234');
+  const c = await admin.ok('contracts', 'create', { ...base, customerName: '확정고객', customerPhone: '010-6161-1111', lineItems: [{ name: '다운라이트', qty: 2, unitPrice: 20000 }] });
+  const img = 'data:image/png;base64,' + Buffer.from('room').toString('base64');
+  const d1 = (await admin.ok('contracts', 'saveDrawing', c.id, { name: '거실', image: img, icons: [{ id: 'a', type: 'downlight', x: 10, y: 10 }] })).drawing;
+  await admin.ok('contracts', 'saveDrawing', c.id, { name: '안방', image: img, icons: [] });
+  const { token } = await admin.ok('contracts', 'requestSign', c.id);
+  const cust = client();
+  await cust.ok('customerApp', 'login', 'thegood', '확정고객', '01061611111');
+  const anon = client();
+  const seen = async () => ({
+    app: (await cust.ok('customerApp', 'drawings', c.id)).drawings.map((d) => d.name),
+    count: (await cust.ok('customerApp', 'me')).contracts.find((x) => x.id === c.id).drawingCount,
+    sign: (await anon.ok('esign', 'getByToken', token)).contract.drawings.map((d) => d.name),
+    doc: (await anon.ok('esign', 'drawings', token)).flatMap((g) => g.drawings.map((d) => d.name)),
+  });
+  assert.deepEqual(await seen(), { app: [], count: 0, sign: [], doc: [] }, '확정 전엔 아무 데도 안 보임');
+  assert.equal((await admin.ok('contracts', 'drawings', c.id)).length, 2, '사무실은 모두 보임');
+  const r = await admin.ok('contracts', 'confirmDrawing', c.id, d1.id);
+  assert.ok(r.drawing.confirmedAt);
+  assert.deepEqual(await seen(), { app: ['거실'], count: 1, sign: ['거실'], doc: ['거실'] });
+  // 이름만 바꾸면 확정 유지
+  await admin.ok('contracts', 'saveDrawing', c.id, { drawingId: d1.id, name: '거실(최종)', icons: [{ id: 'a', type: 'downlight', x: 10, y: 10 }] });
+  assert.deepEqual((await seen()).app, ['거실(최종)']);
+  // 아이콘을 옮기면 확정이 풀림
+  await admin.ok('contracts', 'saveDrawing', c.id, { drawingId: d1.id, icons: [{ id: 'a', type: 'downlight', x: 30, y: 10 }] });
+  assert.deepEqual((await seen()).app, [], '고치면 다시 확정해야 보임');
+  await admin.ok('contracts', 'confirmDrawing', c.id, d1.id);
+  await admin.ok('contracts', 'confirmDrawing', c.id, d1.id, false);
+  assert.deepEqual((await seen()).app, [], '확정 취소');
+  assert.ok((await admin.ok('contracts', 'get', c.id)).history.some((h) => h.action === '도면 확정 (고객 공개)'));
+  // 기능을 끄면 예전처럼 모두 보임
+  const sup = client();
+  await sup.ok('auth', 'login', 'super', 'super-test-1234');
+  const good = (await sup.ok('companies', 'list')).find((x) => x.code === 'thegood');
+  await sup.ok('companies', 'update', good.id, { features: { drawingConfirm: false } });
+  try {
+    assert.equal((await cust.ok('customerApp', 'drawings', c.id)).drawings.length, 2);
+    assert.equal((await admin('contracts', 'confirmDrawing', c.id, d1.id)).status, 403);
+  } finally {
+    await sup.ok('companies', 'update', good.id, { features: {} });
+  }
+});
+
+test('고객 문서 내려받기 (customerDocs): 사무실이 고른 문서만 고객에게, 파일 올리기·지우기, 거래명세서 자료, 다른 고객 불가, 기능 스위치', async () => {
+  const admin = client();
+  await admin.ok('auth', 'login', 'admin', 'admin1234');
+  const c = await admin.ok('contracts', 'create', { ...base, customerName: '문서고객', customerPhone: '010-6262-1111', lineItems: [{ name: '펜던트', qty: 1, unitPrice: 150000 }] });
+  const img = 'data:image/png;base64,' + Buffer.from('room').toString('base64');
+  const d = (await admin.ok('contracts', 'saveDrawing', c.id, { name: '거실', image: img, icons: [] })).drawing;
+  // 파일 올리기 (시험은 가짜 저장소)
+  const up = await admin.ok('contracts', 'addFile', c.id, { name: '견적서.pdf', size: 1234, type: 'application/pdf' });
+  assert.ok(up.uploadUrl.startsWith('fake://upload/cfiles/'));
+  await admin.ok('contracts', 'confirmFile', c.id, up.fileId);
+  const up2 = await admin.ok('contracts', 'addFile', c.id, { name: '내부메모.xlsx', size: 10, type: '' });
+  await admin.ok('contracts', 'confirmFile', c.id, up2.fileId);
+  assert.equal((await admin('contracts', 'addFile', c.id, { name: 'big.pdf', size: 60 * 1024 * 1024 })).status, 400, '50MB 까지');
+  let docs = await admin.ok('contracts', 'customerDocs', c.id);
+  assert.deepEqual(docs.files.map((f) => f.name), ['견적서.pdf', '내부메모.xlsx']);
+  assert.deepEqual(docs.docs, { contract: false, drawings: false, statement: false, fileIds: [] }, '처음엔 아무것도 공개 안 함');
+  const cust = client();
+  await cust.ok('customerApp', 'login', 'thegood', '문서고객', '01062621111');
+  assert.equal((await cust.ok('customerApp', 'me')).contracts.find((x) => x.id === c.id).docCount, 0);
+  // 공개할 문서 고르기: 계약서·도면·거래명세서·견적서만 (없는 파일 번호는 빠짐)
+  await admin.ok('contracts', 'requestSign', c.id);
+  await admin.ok('contracts', 'confirmDrawing', c.id, d.id);
+  docs = await admin.ok('contracts', 'setCustomerDocs', c.id, { contract: true, drawings: true, statement: true, fileIds: [up.fileId, 999] });
+  assert.deepEqual(docs.docs.fileIds, [up.fileId]);
+  let r = await cust.ok('customerApp', 'documents', c.id);
+  assert.ok(r.contract.token, '계약서 링크');
+  assert.deepEqual(r.drawings.map((x) => x.name), ['거실']);
+  assert.equal(r.drawings[0].image, img, '도면 그림까지 (그림 파일로 내려받기)');
+  assert.equal(r.statement, null, '거래명세서 기능이 꺼진 업체는 없음');
+  assert.deepEqual(r.files.map((f) => f.name), ['견적서.pdf'], '고른 파일만');
+  assert.ok(r.files[0].url.startsWith('fake://download/'));
+  // 거래명세서 기능을 켜면 인쇄용 자료
+  const sup = client();
+  await sup.ok('auth', 'login', 'super', 'super-test-1234');
+  const good = (await sup.ok('companies', 'list')).find((x) => x.code === 'thegood');
+  await sup.ok('companies', 'update', good.id, { features: { statement: true } });
+  try {
+    r = await cust.ok('customerApp', 'documents', c.id);
+    assert.equal(r.statement.contract.lineItems[0].unitPrice, 150000);
+    assert.equal(r.statement.contract.customerName, '문서고객');
+    assert.equal(r.statement.contract.memo, undefined, '내부 메모는 안 감');
+    assert.equal((await cust.ok('customerApp', 'me')).contracts.find((x) => x.id === c.id).docCount, 4);
+  } finally {
+    await sup.ok('companies', 'update', good.id, { features: {} });
+  }
+  // 파일을 지우면 공개 목록에서도 빠짐
+  await admin.ok('contracts', 'removeFile', c.id, up.fileId);
+  assert.deepEqual((await cust.ok('customerApp', 'documents', c.id)).files, []);
+  // 계약 목록에는 파일 목록을 싣지 않음
+  assert.equal((await admin.ok('contracts', 'list', {})).find((x) => x.id === c.id).contractFiles, undefined);
+  // 다른 고객의 계약은 불가, 기사는 파일 못 올림
+  const other = await admin.ok('contracts', 'create', { ...base, customerName: '남의문서고객', customerPhone: '010-6262-2222' });
+  assert.equal((await cust('customerApp', 'documents', other.id)).status, 404);
+  const eng = client();
+  await eng.ok('auth', 'login', 'gong', 'gong1234', '', 'engineer');
+  assert.notEqual((await eng('contracts', 'addFile', c.id, { name: 'a.pdf', size: 1 })).status, 200);
+  // 기능 끄기
+  await sup.ok('companies', 'update', good.id, { features: { customerDocs: false } });
+  try {
+    assert.equal((await cust('customerApp', 'documents', c.id)).status, 403);
+    assert.equal((await admin('contracts', 'customerDocs', c.id)).status, 403);
+    assert.equal((await cust.ok('customerApp', 'me')).contracts.find((x) => x.id === c.id).docCount, 0);
   } finally {
     await sup.ok('companies', 'update', good.id, { features: {} });
   }

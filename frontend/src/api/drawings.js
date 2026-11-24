@@ -4,10 +4,12 @@
 //     x·y 는 도면 그림 안의 위치(0~100%) — 화면 크기·확대와 상관없이 같은 자리
 //     line: 계약 상품 줄 번호(0부터) — 그 아이콘이 어느 제품인지 (없으면 null)
 //   shapes: [{ id, kind(rect·ellipse·line·arrow·text), x, y, x2, y2, text, color, size, fill }] — 도형·선·글자 (위치 0~100%)
+//   confirmedAt·confirmedBy: 확정(기능 drawingConfirm) — 고객 화면·계약서에는 확정된 도면만. 그림·아이콘·도형을 고치면 확정이 풀림
 //   도면 그림은 영수증·사진과 같은 표(paymentReceipts)에 kind 'drawing' (사진 저장소를 켜면 저장소로)
 //   보기: 계약 보기 권한 · 고치기: 계약 수정 권한
 // ============================================================
 import { ApiError, nowIso } from './core.js';
+import { hasFeature } from '../constants.js';
 import { nextId } from './runtime.js';
 
 export const DRAWING_KIND = 'drawing';
@@ -39,6 +41,10 @@ function cleanIcons(icons, lineCount) {
     note: String(ic?.note || '').trim().slice(0, 100),
   }));
 }
+
+// 내용 비교용 글자 — DB(JSONB)가 키 순서를 바꿔 저장하므로 키를 정렬해서 비교
+const canon = (v) => (Array.isArray(v) ? v.map(canon) : v && typeof v === 'object' ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, canon(v[k])])) : v);
+const sig = (v) => JSON.stringify(canon(v));
 
 function cleanShapes(shapes) {
   return (Array.isArray(shapes) ? shapes : [])
@@ -85,12 +91,35 @@ export function saveDrawing(db, user, c, { drawingId, name, image, w, h, icons, 
     d.h = Math.max(1, Math.round(Number(h) || 0)) || null;
   }
   d.name = String(name ?? d.name ?? '').trim().slice(0, 30) || `도면 ${c.drawings.indexOf(d) + 1}`;
+  const before = sig([d.imageId, d.icons || [], d.shapes || []]);
   if (icons !== undefined) d.icons = cleanIcons(icons, (c.lineItems || []).length);
   if (shapes !== undefined) d.shapes = cleanShapes(shapes);
+  // 확정된 도면의 내용(그림·아이콘·도형)이 바뀌면 확정을 풂 → 다시 확정해야 고객에게 보임
+  if (d.confirmedAt && sig([d.imageId, d.icons || [], d.shapes || []]) !== before) {
+    d.confirmedAt = null;
+    d.confirmedBy = '';
+  }
   d.updatedAt = nowIso();
   d.byName = user.name || '';
   c.updatedAt = nowIso();
   return d;
+}
+
+// 확정 / 확정 취소
+export function confirmDrawing(user, c, drawingId, on = true) {
+  const d = (c.drawings || []).find((x) => x.id === Number(drawingId));
+  if (!d) throw new ApiError('도면을 찾을 수 없습니다.', 'NOT_FOUND');
+  d.confirmedAt = on ? nowIso() : null;
+  d.confirmedBy = on ? user.name || '' : '';
+  c.updatedAt = nowIso();
+  return d;
+}
+
+// 고객에게 보여 줄 도면 — 확정 기능(drawingConfirm)을 켠 업체는 확정된 것만
+export function customerDrawingList(db, c) {
+  const company = db.companies.find((x) => x.id === c.companyId);
+  const all = c.drawings || [];
+  return hasFeature(company, 'drawingConfirm') ? all.filter((d) => d.confirmedAt) : all;
 }
 
 export function removeDrawing(db, c, drawingId) {

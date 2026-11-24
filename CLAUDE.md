@@ -18,6 +18,7 @@
 - `services.js` 로그인 `auth`·업체 `companies`·직원 `users`·기사 `engineers`·팀·상품·아파트·수정로그 `auditLogs`(되돌리기)·상담내역 `callLogs`·매입 `purchases`·재고 `stocks`
 - `schedule.js` 일정·휴무·박람회 `fairs`·기사모바일 `engineerApp` / `core.js` 세션·권한·`requireFeature` / `views.js` 화면용 계약 모양·변경이력
 - `drawings.js` 시공 도면(층별 도면·조명 아이콘, 고객 보기 `customerApp.drawings`) / 도면 파일 읽기 `utils/planFile.js`(그림·PDF·PPT)
+- `customerDocs.js` 고객 공개 문서(계약별 고를 문서·올린 파일, 고객 내려받기 `customerApp.documents`)
 - `files.js` 회사 자료 백업 `companyFiles`(파일은 Supabase Storage, 목록은 업체 정보 `files`)
 - `audit.js` 수정로그 문구·되돌리기 자료 / `numbering.js` 계약번호(계약일 순) / `seed.js` 데모 자료·`migrate()` / `sessionSlots.js` 탭별 로그인 칸
 - `constants.js`(src 바로 아래) 브랜드·시공 구분·`FEATURES` 기능 스위치
@@ -32,7 +33,7 @@
 - `pages/StatsPage.jsx` 통계(매출·매입·차액) / `PurchasePage.jsx` 매입관리 / `StockPage.jsx` 재고체크 (통계정보 하위, 기능 `purchases`·`stocks`)
 - `pages/EngineerApp.jsx` 기사모바일 / `ConsultHome.jsx` 상담실장 / `CustomerApp.jsx` 고객확인 / `SignPage.jsx` 서명 / `AccountManagement.jsx` 운영자 업체·계정
 - `pages/settings/` 설정 화면들(가져오기·회사 자료 백업·알림톡·계약조건·수정로그·기사/팀/상품/아파트) / `components/ScheduleManagement.jsx` 일정 달력
-- `components/DrawingEditor.jsx` 시공 도면 편집 / `ContractScan.jsx` 계약서 스캔 / `StatementModal.jsx` 거래명세서
+- `components/DrawingEditor.jsx` 시공 도면 편집(확정 포함) / `CustomerDocsPanel.jsx` 고객 공개 문서 / `utils/drawingImage.js` 도면 → 그림 파일 / `ContractScan.jsx` 계약서 스캔 / `StatementModal.jsx` 거래명세서
 - `components/InstallCard.jsx` + `utils/install.js` 앱 설치 / `auth/AuthContext.jsx` 로그인 상태
 
 아르떼 진행 상황·받을 자료 `docs/ARTE.md`

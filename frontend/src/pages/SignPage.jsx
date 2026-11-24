@@ -109,14 +109,18 @@ export default function SignPage({ token, onDone }) {
 
   return (
     <div className="sign-page">
-      <div className="sign-card">
+      <div className="sign-card printable">
+        {/* 서명한 계약서를 고객이 PDF 로 보관 (인쇄 창에서 'PDF로 저장') */}
+        <div className="sign-print no-print">
+          <button type="button" className="btn-confirm outline" onClick={() => window.print()}>📄 인쇄 / PDF 저장</button>
+        </div>
         <ContractDocument contract={data.contract} contracts={data.contracts} company={data.company} showStatus />
         {data.contracts.some((c) => c.drawings?.length) && <ContractDrawings load={() => esign.drawings(token)} />}
 
         {done ? (
-          <div className="sign-done">✅ 서명이 완료되었습니다. 감사합니다.</div>
+          <div className="sign-done no-print">✅ 서명이 완료되었습니다. 감사합니다.</div>
         ) : (
-          <div className="sign-form">
+          <div className="sign-form no-print">
             <label className="agree">
               <input type="checkbox" checked={agreed} onChange={(e) => setAgreed(e.target.checked)} /> 위 계약 내용을 확인하였으며 이에 동의합니다.
             </label>

@@ -7,7 +7,8 @@ import { loadDb, saveDb, nextId, publicBaseUrl, clientInfo, getSession, setSessi
 import { ApiError, authorize, authorizeAny, clone, companyOf, findContract, findReadableContract, ownsContract, readableContracts, requireFeature, isLoginIdTaken, nowIso, validatePassword, visibleContracts } from './core.js';
 import { addHistory, assigneeOf, contractListView, contractView, hideAmounts } from './views.js';
 import { addStepPhotos, listStepPhotos, removeStepPhoto, updateStepPhoto } from './stepPhotos.js';
-import { listDrawings, removeDrawing, saveDrawing } from './drawings.js';
+import { confirmDrawing, customerDrawingList, listDrawings, removeDrawing, saveDrawing } from './drawings.js';
+import { addContractFile, contractFileList, customerDocsOf, removeContractFile, setCustomerDocs, confirmContractFile } from './customerDocs.js';
 import { assertAssignable } from './schedule.js';
 import { invalidateNumbers, numberOf } from './numbering.js';
 import { can, ROLES, DATA_SCOPES, DEFAULT_MANAGER_PERMISSIONS, isOwnScopeOnly } from '../auth/permissions.js';
@@ -949,6 +950,61 @@ export const contracts = {
     return { drawing: { ...d } };
   },
 
+  // 도면 확정 / 확정 취소 (기능 drawingConfirm) — 확정된 도면만 고객 화면·계약서에 보임
+  async confirmDrawing(id, drawingId, on = true) {
+    const { db, user } = await authorize('contract.edit');
+    requireFeature(db, user, 'drawings');
+    requireFeature(db, user, 'drawingConfirm');
+    const c = findContract(db, user, id);
+    const d = confirmDrawing(user, c, drawingId, on);
+    addHistory(c, user, on ? '도면 확정 (고객 공개)' : '도면 확정 취소', [{ label: '도면', from: '', to: d.name }]);
+    saveDb(db);
+    return { drawing: { ...d } };
+  },
+
+  // ---- 고객 공개 문서 (기능 customerDocs): 계약마다 고객이 내려받을 수 있는 문서 고르기 + 파일 올리기
+  async customerDocs(id) {
+    const { db, user } = await authorize('contract.view');
+    requireFeature(db, user, 'customerDocs');
+    const c = findReadableContract(db, user, id);
+    return { docs: customerDocsOf(c), files: await contractFileList(c) };
+  },
+  async setCustomerDocs(id, docs) {
+    const { db, user } = await authorize('contract.edit');
+    requireFeature(db, user, 'customerDocs');
+    const c = findContract(db, user, id);
+    setCustomerDocs(c, docs);
+    addHistory(c, user, '고객 공개 문서 변경');
+    saveDb(db);
+    return { docs: customerDocsOf(c) };
+  },
+  async addFile(id, file) {
+    const { db, user } = await authorize('contract.edit');
+    requireFeature(db, user, 'customerDocs');
+    const c = findContract(db, user, id);
+    const r = await addContractFile(user, c, file);
+    saveDb(db);
+    return r;
+  },
+  async confirmFile(id, fileId) {
+    const { db, user } = await authorize('contract.edit');
+    requireFeature(db, user, 'customerDocs');
+    const c = findContract(db, user, id);
+    const f = confirmContractFile(c, fileId);
+    addHistory(c, user, '문서 파일 추가', [{ label: '파일', from: '', to: f.name }]);
+    saveDb(db);
+    return { ok: true };
+  },
+  async removeFile(id, fileId) {
+    const { db, user } = await authorize('contract.edit');
+    requireFeature(db, user, 'customerDocs');
+    const c = findContract(db, user, id);
+    const f = await removeContractFile(c, fileId);
+    addHistory(c, user, '문서 파일 삭제', [{ label: '파일', from: f.name, to: '' }]);
+    saveDb(db);
+    return { ok: true };
+  },
+
   async removeDrawing(id, drawingId) {
     const { db, user } = await authorize('contract.edit');
     requireFeature(db, user, 'drawings');
@@ -1271,7 +1327,7 @@ export const esign = {
     const list = bundleByToken(db, token);
     const company = db.companies.find((x) => x.id === list[0].companyId);
     if (!hasFeature(company, 'drawings') || !hasFeature(company, 'drawingsInContract')) return [];
-    return list.filter((c) => (c.drawings || []).length).map((c) => drawingGroup(db, c, { forCustomer: true }));
+    return list.filter((c) => customerDrawingList(db, c).length).map((c) => drawingGroup(db, c, { forCustomer: true }));
   },
 
   // 한 링크에 묶인 계약들(줄눈·청소 등)을 한 장의 계약서로
@@ -1289,7 +1345,10 @@ export const esign = {
       } else delete view.esign.signature;
       delete view.history;
       // 도면 아이콘의 사무실 메모는 고객에게 보이지 않게
-      if (view.drawings) view.drawings = view.drawings.map((d) => ({ ...d, icons: (d.icons || []).map(({ note, ...ic }) => ic) })); // eslint-disable-line no-unused-vars
+      // 확정된 도면만(기능 drawingConfirm), 아이콘 메모 없이
+      view.drawings = customerDrawingList(db, c).map((d) => ({ ...d, icons: (d.icons || []).map(({ note, ...ic }) => ic) })); // eslint-disable-line no-unused-vars
+      delete view.contractFiles;
+      delete view.customerDocs;
       delete view.memo; // 내부 메모는 고객에게 노출하지 않음
       delete view.happyCallMemo;
       delete view.notes;
@@ -1542,9 +1601,29 @@ function customerContractView(db, c) {
     })),
     amounts: { total: a.total, discount: a.discount + a.voucher, actual: a.actual - a.canceled, deposit: a.byKind['계약금'] || 0, paid: a.paid - a.refund, balance: a.balance },
     esign: { status: c.esign?.status || ESIGN_STATUS.NONE, token: waiting ? c.esign.token : null, signedAt: c.esign?.signedAt || null },
-    drawingCount: customerSeesDrawings(db, c) ? (c.drawings || []).length : 0, // 고객 도면 보기 (기능 drawings + customerDrawings)
+    drawingCount: customerSeesDrawings(db, c) ? customerDrawingList(db, c).length : 0, // 고객 도면 보기 (기능 drawings + customerDrawings, 확정된 것만)
+    docCount: customerDocCount(db, c), // 고객이 내려받을 수 있는 문서 수 (기능 customerDocs)
   };
 }
+
+// 고객이 내려받을 수 있는 문서 (기능 customerDocs) — 사무실이 고른 것 중 지금 실제로 있는 것만
+function customerDocItems(db, c) {
+  const company = db.companies.find((x) => x.id === c.companyId);
+  if (!hasFeature(company, 'customerDocs')) return null;
+  const d = customerDocsOf(c);
+  const signed = c.esign?.status === ESIGN_STATUS.SIGNED;
+  const waiting = c.esign?.status === ESIGN_STATUS.WAITING;
+  return {
+    contract: d.contract && c.esign?.token && (signed || waiting) ? { token: c.esign.token, signed } : null,
+    drawings: d.drawings && hasFeature(company, 'drawings') ? customerDrawingList(db, c).map((x) => ({ id: x.id, name: x.name })) : [],
+    statement: d.statement && hasFeature(company, 'statement'),
+    fileIds: d.fileIds,
+  };
+}
+const customerDocCount = (db, c) => {
+  const it = customerDocItems(db, c);
+  return it ? (it.contract ? 1 : 0) + it.drawings.length + (it.statement ? 1 : 0) + it.fileIds.length : 0;
+};
 
 const customerSeesDrawings = (db, c) => {
   const company = db.companies.find((x) => x.id === c.companyId);
@@ -1623,8 +1702,38 @@ export const customerApp = {
       const p = l.productId ? db.products.find((x) => x.id === l.productId && x.companyId === c.companyId) : null;
       return { name: l.name, qty: l.qty, detail: l.detail || '', spec: p?.spec || '', photo: p?.hasPhoto ? photoOf(p.id) : '' };
     });
-    const drawings = listDrawings(db, c).map(({ id: did, name, image, w, h, icons, shapes }) => ({ id: did, name, image, w, h, shapes: shapes || [], icons: (icons || []).map(({ id: iid, type, x, y, line }) => ({ id: iid, type, x, y, line })) }));
+    const shown = new Set(customerDrawingList(db, c).map((d) => d.id));
+    const drawings = listDrawings(db, c).filter((d) => shown.has(d.id)).map(({ id: did, name, image, w, h, icons, shapes }) => ({ id: did, name, image, w, h, shapes: shapes || [], icons: (icons || []).map(({ id: iid, type, x, y, line }) => ({ id: iid, type, x, y, line })) }));
     return { drawings, lines };
+  },
+
+  // 내려받을 수 있는 문서 (기능 customerDocs): 계약서 링크 · 확정 도면 · 거래명세서(인쇄용 자료) · 파일(내려받기 주소)
+  async documents(id) {
+    const db = await loadDb();
+    const cust = await customerSession(db);
+    const c = db.contracts.find((x) => x.id === Number(id) && ownedBy(x, cust));
+    if (!c) throw new ApiError('계약을 찾을 수 없습니다.', 'NOT_FOUND');
+    requireFeature(db, cust.companyId, 'customerDocs');
+    const it = customerDocItems(db, c);
+    const company = db.companies.find((x) => x.id === c.companyId);
+    const statement = it.statement
+      ? {
+          contract: {
+            ...Object.fromEntries(['id', 'category', 'customerName', 'customerPhone', 'aptName', 'dong', 'ho', 'aptType', 'contractDate', 'items', 'discountReason', 'totalAmount', 'discount', 'voucher', 'status'].map((k) => [k, c[k]])),
+            no: numberOf(db, c),
+            lineItems: (c.lineItems || []).map((l) => ({ name: l.name, detail: l.detail || '', qty: l.qty, unitPrice: l.unitPrice })),
+            payments: (c.payments || []).map((p) => ({ kind: p.kind, amount: p.amount, method: p.method, refund: p.refund })),
+          },
+          company: Object.fromEntries(['name', 'ceo', 'bizNo', 'address', 'bizType', 'bizItem', 'csPhone', 'mobile'].map((k) => [k, company?.[k] || ''])),
+        }
+      : null;
+    // 도면: 그림 + 도형 + 아이콘(메모 없이) — 화면에서 그림 파일로 만들어 내려받음
+    const ids = new Set(it.drawings.map((x) => x.id));
+    const drawings = listDrawings(db, c)
+      .filter((x) => ids.has(x.id))
+      .map(({ id: did, name, image, w, h, icons, shapes }) => ({ id: did, name, image, w, h, shapes: shapes || [], icons: (icons || []).map(({ note, ...ic }) => ic) })); // eslint-disable-line no-unused-vars
+    const lines = (c.lineItems || []).map((l) => ({ name: l.name, qty: l.qty }));
+    return { contract: it.contract, drawings, lines, statement, files: it.fileIds.length ? await contractFileList(c, it.fileIds) : [] };
   },
 
   async logout() {
@@ -1640,7 +1749,7 @@ function drawingGroup(db, c, { forCustomer = false } = {}) {
     contractId: c.id,
     category: c.category,
     lines: (c.lineItems || []).map((l) => ({ name: l.name, qty: l.qty })),
-    drawings: listDrawings(db, c).map(({ id, name, image, w, h, icons, shapes }) => ({
+    drawings: listDrawings(db, c).filter((d) => !forCustomer || customerDrawingList(db, c).some((x) => x.id === d.id)).map(({ id, name, image, w, h, icons, shapes }) => ({
       id,
       name,
       image,

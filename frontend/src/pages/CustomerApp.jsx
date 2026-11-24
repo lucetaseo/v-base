@@ -6,6 +6,8 @@ import { formatPhone, won } from '../utils/format.js';
 import { formatKoreanDate } from '../utils/date.js';
 import { navigate } from '../router.js';
 import DrawingEditor, { ICONS } from '../components/DrawingEditor.jsx';
+import StatementModal from '../components/StatementModal.jsx';
+import { downloadDrawing } from '../utils/drawingImage.js';
 
 // 고객모바일 (/{업체}/c, 알림톡 링크 /{업체}/c/{고유값})
 //   - 링크로 들어오면 입력 없이 바로 로그인
@@ -227,6 +229,7 @@ function MyContracts({ data }) {
           )}
 
           {c.drawingCount > 0 && <CustDrawings contractId={c.id} count={c.drawingCount} />}
+          {c.docCount > 0 && <CustDocs contractId={c.id} count={c.docCount} />}
 
           <div className="cust-actions">
             {c.esign.token ? (
@@ -240,6 +243,74 @@ function MyContracts({ data }) {
         </section>
       ))}
       {data.company.help && <CustHelp help={data.company.help} />}
+    </div>
+  );
+}
+
+// 문서 내려받기 (기능 customerDocs): 업체가 고른 것만 — 계약서(PDF 저장) · 확정 도면(그림 파일) · 거래명세서 · 파일
+function CustDocs({ contractId, count }) {
+  const [open, setOpen] = useState(false);
+  const [data, setData] = useState(null);
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState('');
+  const [statement, setStatement] = useState(false);
+  const toggle = async () => {
+    if (!open && !data) {
+      try {
+        setError('');
+        setData(await customerApp.documents(contractId));
+      } catch (e) {
+        setError(e.message || '문서를 불러오지 못했습니다.');
+        return;
+      }
+    }
+    setOpen((v) => !v);
+  };
+  const saveDrawing = async (d) => {
+    try {
+      setBusy(d.name);
+      await downloadDrawing(d);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setBusy('');
+    }
+  };
+  return (
+    <div className="cust-docs">
+      <button type="button" className="btn-confirm outline" onClick={toggle}>
+        {open ? '문서 접기' : `📄 문서 내려받기 (${count})`}
+      </button>
+      {error && <p className="login-error">{error}</p>}
+      {open && data && (
+        <ul className="cust-doc-list">
+          {data.contract && (
+            <li>
+              <span>📝 계약서{data.contract.signed ? ' (서명 완료)' : ''}</span>
+              <a className="btn-link" href={`/sign/${data.contract.token}`} target="_blank" rel="noreferrer">열기 → [인쇄 / PDF 저장]</a>
+            </li>
+          )}
+          {data.drawings.map((d) => (
+            <li key={`d${d.id}`}>
+              <span>🗺 시공 도면 — {d.name}</span>
+              <button type="button" className="btn-link" onClick={() => saveDrawing(d)} disabled={!!busy}>{busy === d.name ? '만드는 중...' : '그림 파일 받기'}</button>
+            </li>
+          ))}
+          {data.statement && (
+            <li>
+              <span>🧾 거래명세서</span>
+              <button type="button" className="btn-link" onClick={() => setStatement(true)}>열기 → [인쇄 / PDF 저장]</button>
+            </li>
+          )}
+          {data.files.map((f) => (
+            <li key={`f${f.id}`}>
+              <span>📎 {f.name}</span>
+              <a className="btn-link" href={f.url} target="_blank" rel="noreferrer" download={f.name}>받기</a>
+            </li>
+          ))}
+        </ul>
+      )}
+      {statement && data?.statement && <StatementModal contract={data.statement.contract} company={data.statement.company} onClose={() => setStatement(false)} />}
     </div>
   );
 }

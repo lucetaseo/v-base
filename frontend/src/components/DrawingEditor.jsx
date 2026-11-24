@@ -8,6 +8,7 @@ import { PLAN_ACCEPT, planPages } from '../utils/planFile.js';
 //   도형·선·글자(shapes): 사각형·원·선·화살표·글자 — 끌어서 그리고, 고르면 양 끝 손잡이로 크기 조절, 끌어서 옮김
 //   lines: 계약 상품 줄 (아이콘 ↔ 제품 연결, 범례에서 계약 수량과 비교)
 //   canEdit: false 면 보기만 (아이콘을 누르면 설명)
+//   confirmable: 확정 버튼 (기능 drawingConfirm, api.confirm(drawingId, on)) — 확정한 도면만 고객 화면·계약서에 보임
 //   deferred: 계약 등록·수정 화면용 — 자체 [저장] 버튼 없이 api(화면 보관함)에 바로 넣고, 계약 [저장] 때 함께 저장
 //     ref.flush(): 고치는 중인 아이콘·도형을 보관함에 넣음 (계약 저장 직전에 부름)
 //   renderInfo(icon, line): 보기 전용에서 아이콘을 눌렀을 때 보일 내용 (고객 화면: 제품 사진·사양 카드)
@@ -66,7 +67,7 @@ export function DrawingIcon({ type, selected, title, onPointerDown, onClick, sty
 const lineLabel = (lines, i) => (i === null || i === undefined || !lines[i] ? '' : `${lines[i].name}${lines[i].qty > 1 ? ` (계약 ${lines[i].qty}개)` : ''}`);
 const newId = () => `i${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 
-export default forwardRef(function DrawingEditor({ api, lines = [], canEdit = false, onError, renderInfo, deferred = false }, ref) {
+export default forwardRef(function DrawingEditor({ api, lines = [], canEdit = false, onError, renderInfo, deferred = false, confirmable = false, onListChange }, ref) {
   const [list, setList] = useState(null);
   const [activeId, setActiveId] = useState(null);
   const [icons, setIcons] = useState([]); // 고치는 중인 아이콘 (저장 전)
@@ -88,6 +89,7 @@ export default forwardRef(function DrawingEditor({ api, lines = [], canEdit = fa
     try {
       const l = await api.list();
       setList(l);
+      onListChange?.(l); // 도면 목록이 바뀜 (확정 수 등 — 계약 상세의 고객 공개 문서 칸)
       const id = keep && l.some((d) => d.id === keep) ? keep : l[0]?.id ?? null;
       setActiveId(id);
       setIcons(l.find((d) => d.id === id)?.icons || []);
@@ -231,6 +233,19 @@ export default forwardRef(function DrawingEditor({ api, lines = [], canEdit = fa
     return addPages(sel, sel.length === 1);
   };
 
+  // 확정 / 확정 취소 — 확정한 도면만 고객 화면·계약서에 보임
+  const toggleConfirm = async () => {
+    const on = !active.confirmedAt;
+    if (on && dirty) return window.alert('저장하지 않은 변경이 있습니다. 먼저 [💾 도면 저장]을 눌러 주세요.');
+    if (!window.confirm(on ? `[${active.name}] 도면을 확정할까요?\n확정하면 고객 확인 페이지와 계약서에 이 도면이 보입니다.` : `[${active.name}] 도면 확정을 취소할까요?\n고객 화면과 계약서에서 이 도면이 빠집니다.`)) return;
+    try {
+      await api.confirm(active.id, on);
+      await load(active.id);
+    } catch (err) {
+      onError?.(err);
+    }
+  };
+
   const rename = async () => {
     const name = window.prompt('도면 이름', active.name);
     if (name === null || !name.trim()) return;
@@ -253,7 +268,8 @@ export default forwardRef(function DrawingEditor({ api, lines = [], canEdit = fa
   };
 
   const save = async () => {
-    if (!window.confirm(`[${active.name}] 도면을 저장하시겠습니까?`)) return;
+    const warn = confirmable && active.confirmedAt ? '\n\n확정된 도면입니다. 내용을 고치면 확정이 풀려 다시 확정할 때까지 고객에게 보이지 않습니다.' : '';
+    if (!window.confirm(`[${active.name}] 도면을 저장하시겠습니까?${warn}`)) return;
     setBusy('저장하는 중...');
     try {
       await api.save({ drawingId: active.id, icons, shapes });
@@ -405,7 +421,7 @@ export default forwardRef(function DrawingEditor({ api, lines = [], canEdit = fa
       <div className="dwg-tabs">
         {list.map((d) => (
           <button key={d.id} type="button" className={d.id === activeId ? 'active' : ''} onClick={() => pick(d)}>
-            {d.name} <span className="sub-text">({(d.id === activeId ? icons : d.icons || []).length})</span>
+            {confirmable && d.confirmedAt ? '✔ ' : ''}{d.name} <span className="sub-text">({(d.id === activeId ? icons : d.icons || []).length})</span>
           </button>
         ))}
         {canEdit && (
@@ -476,6 +492,16 @@ export default forwardRef(function DrawingEditor({ api, lines = [], canEdit = fa
                   <button type="button" className="btn-dark-sm" onClick={save} disabled={!dirty || !!busy}>
                     {dirty ? '💾 도면 저장' : '저장됨'}
                   </button>
+                )}
+                {confirmable && !deferred && (
+                  active.confirmedAt ? (
+                    <span className="dwg-confirmed">
+                      ✔ 확정 · 고객 공개 중 <span className="sub-text">({String(active.confirmedAt).slice(0, 10)} {active.confirmedBy})</span>
+                      <button type="button" className="btn-link" onClick={toggleConfirm}>확정 취소</button>
+                    </span>
+                  ) : (
+                    <button type="button" className="btn-confirm-sm" onClick={toggleConfirm} title="확정한 도면만 고객 확인 페이지·계약서에 보입니다">✔ 확정 (고객 공개)</button>
+                  )
                 )}
                 <button type="button" className="btn-link" onClick={rename}>이름 바꾸기</button>
                 <label className="btn-link">
