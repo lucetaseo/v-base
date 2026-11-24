@@ -14,6 +14,7 @@ import DiscountModal from '../components/DiscountModal.jsx';
 import { backdrop } from '../utils/backdrop.js';
 import ContractViewModal from '../components/ContractViewModal.jsx';
 import StatementModal from '../components/StatementModal.jsx';
+import { PLAN_ACCEPT } from '../utils/planFile.js';
 import { PAPER_MAX } from '../components/PaperPhotos.jsx';
 import PhotoViewer from '../components/PhotoViewer.jsx';
 import StepPhotos from '../components/StepPhotos.jsx';
@@ -60,6 +61,22 @@ export default function ContractDetail({ contractId, initialTab, focus, onBack, 
   const [kakao, setKakao] = useState(null); // { contract, template, brand }
   const [viewId, setViewId] = useState(null);
   const [statementOf, setStatementOf] = useState(null); // 거래명세서 (기능 statement)
+  // 탭 줄 [도면 추가]: 고른 파일을 [계약정보] 탭의 도면 편집에 넘김
+  const drawingRef = useRef(null);
+  const [pendingDrawing, setPendingDrawing] = useState(null);
+  const pickDrawingFile = (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setTab('계약정보');
+    setPendingDrawing(file);
+  };
+  useEffect(() => {
+    if (!pendingDrawing || tab !== '계약정보' || !drawingRef.current) return;
+    drawingRef.current.addFile(pendingDrawing);
+    setTimeout(() => document.querySelector('.dwg')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50); // 도면 칸으로 내려감
+    setPendingDrawing(null);
+  }, [pendingDrawing, tab]);
   const [asPhotos, setAsPhotos] = useState(null); // AS 사진 크게 보기 { images, title }
   const openAsPhotos = async (id, index) => {
     try {
@@ -284,6 +301,7 @@ export default function ContractDetail({ contractId, initialTab, focus, onBack, 
     <>
       <h3 className="form-section-title">&gt; 시공 도면 — {selected.category}</h3>
       <DrawingEditor
+        ref={drawingRef}
         key={selected.id}
         api={{
           list: () => contractApi.drawings(selected.id),
@@ -779,6 +797,13 @@ export default function ContractDetail({ contractId, initialTab, focus, onBack, 
           <button type="button" className="detail-edit-btn" onClick={() => onEdit(selected)} title={`No.${selected.no} ${selected.category} 수정`}>
             ✏️ 수정
           </button>
+        )}
+        {/* 탭 옆 [도면 추가]: 수정에 들어가지 않고 바로 도면 파일을 골라 추가 → [계약정보] 탭의 도면으로 */}
+        {currentHasFeature('drawings') && canDo('contract.edit', selected) && !selected.deletedAt && (
+          <label className="detail-edit-btn detail-dwg-btn" title={`No.${selected.no} ${selected.category}에 도면 추가 (그림·PDF·PPT)`}>
+            🗺 도면 추가
+            <input type="file" accept={PLAN_ACCEPT} hidden onChange={pickDrawingFile} />
+          </label>
         )}
       </div>
 

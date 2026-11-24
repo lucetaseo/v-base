@@ -6779,3 +6779,22 @@ a.import-no:hover {
     print-color-adjust: exact;
   }
 }
+
+/* 계약 상세 탭 줄 [도면 추가] */
+.detail-tabs label.detail-dwg-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 80px;
+  padding: 9px 16px;
+  border: 1px solid #b86e00;
+  background: #fff7e8;
+  color: #8f5300;
+  border-radius: 3px;
+  font-size: 13px;
+  font-weight: bold;
+  cursor: pointer;
+}
+.detail-tabs label.detail-dwg-btn:hover {
+  background: #ffedcc;
+}
